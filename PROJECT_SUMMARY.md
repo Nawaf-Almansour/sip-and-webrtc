@@ -147,7 +147,43 @@ A production-ready video conferencing platform with advanced multi-track support
 
 ## 🏗️ Architecture
 
-### WebRTC P2P Mode
+### System Overview
+
+```mermaid
+graph TB
+    subgraph "Frontend (React + TypeScript)"
+        UI[Meeting UI]
+        MS[MediaService]
+        WS[WebRTC Service]
+        VS[Verto Service]
+    end
+    
+    subgraph "Backend (Node.js)"
+        API[REST API]
+        SIG[WebSocket Signaling]
+        DB[(PostgreSQL)]
+    end
+    
+    subgraph "Media Infrastructure"
+        FS[FreeSWITCH]
+        TURN[TURN/STUN]
+    end
+    
+    UI --> MS
+    MS --> WS
+    MS --> VS
+    WS --> SIG
+    VS --> FS
+    API --> DB
+    WS -.P2P Media.-> WS
+    VS -.SFU Media.-> FS
+    WS --> TURN
+    VS --> TURN
+```
+
+### WebRTC P2P Mode (2-4 Participants)
+
+**Architecture:**
 ```
 Peer Connection (User A ↔ User B)
 ├── Audio Transceiver (MID: 0)
@@ -159,7 +195,69 @@ Track Identification:
 - Fallback: Label matching
 ```
 
-### FreeSWITCH SFU Mode
+**Sequence Diagram: Screen Share Start**
+
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant M as Meeting Component
+    participant MS as MediaService
+    participant WS as WebRTC Service
+    participant P as Peer Connection
+    
+    U->>M: Click "Share Screen"
+    M->>M: getDisplayMedia()
+    M->>M: Get screen track
+    M->>MS: setScreenTrack(screenTrack)
+    MS->>WS: setScreenTrack(screenTrack)
+    
+    loop For each peer connection
+        WS->>P: Find screen transceiver (index 2)
+        WS->>P: await sender.replaceTrack(screenTrack)
+        P-->>WS: Track replaced
+    end
+    
+    WS-->>MS: Success
+    MS-->>M: Success
+    M->>M: setIsScreenSharing(true)
+    M->>M: Update UI (show 📺)
+    
+    Note over M,P: Camera stays active in transceiver 1
+    Note over M,P: Screen now active in transceiver 2
+```
+
+**Data Flow:**
+
+```mermaid
+graph LR
+    subgraph "User A"
+        A1[Camera Track]
+        A2[Screen Track]
+        A3[Audio Track]
+    end
+    
+    subgraph "Peer Connection A→B"
+        T1[Transceiver 0: Audio]
+        T2[Transceiver 1: Camera]
+        T3[Transceiver 2: Screen]
+    end
+    
+    subgraph "User B"
+        B1[Receives Audio]
+        B2[Receives Camera]
+        B3[Receives Screen]
+    end
+    
+    A3 --> T1 --> B1
+    A1 --> T2 --> B2
+    A2 --> T3 --> B3
+    
+    style T3 fill:#f9f,stroke:#333,stroke-width:2px
+```
+
+### FreeSWITCH SFU Mode (5-50+ Participants)
+
+**Architecture:**
 ```
 Participant creates 2 SIP calls:
 ├── Call 1: room-{id}-main   → video-main@1280x720@30fps
@@ -168,6 +266,125 @@ Participant creates 2 SIP calls:
 FreeSWITCH manages 2 conferences:
 ├── Conference "room-{id}-main"   (up to 50 participants)
 └── Conference "room-{id}-screen" (up to 10 participants)
+```
+
+**Sequence Diagram: Join Meeting + Screen Share**
+
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant M as Meeting Component
+    participant MS as MediaService
+    participant VS as Verto Service
+    participant FS as FreeSWITCH
+    
+    Note over U,FS: Join Main Conference
+    U->>M: Join Meeting (Verto mode)
+    M->>MS: joinMainConference(meetingId, stream)
+    MS->>VS: joinMainConference(meetingId, stream)
+    VS->>VS: Create peer connection
+    VS->>VS: Add audio + camera tracks
+    VS->>FS: INVITE room-{id}-main
+    FS-->>VS: 200 OK + SDP
+    VS->>VS: Set remote description
+    VS-->>MS: Joined main conference
+    
+    Note over U,FS: Start Screen Share (Separate Call)
+    U->>M: Click "Share Screen"
+    M->>M: getDisplayMedia()
+    M->>MS: setScreenTrack(screenTrack)
+    MS->>VS: startScreenShare(meetingId, screenStream)
+    VS->>VS: Create separate peer connection
+    VS->>VS: Add screen track (video only)
+    VS->>FS: INVITE room-{id}-screen
+    FS-->>VS: 200 OK + SDP
+    VS->>VS: Set remote description
+    VS-->>MS: Screen share started
+    
+    Note over U,FS: User now has 2 active SIP calls
+    Note over FS: FreeSWITCH manages 2 conferences
+```
+
+**Conference Architecture:**
+
+```mermaid
+graph TB
+    subgraph "Participant A"
+        A1[Camera Stream]
+        A2[Screen Stream]
+        A3[Audio Stream]
+    end
+    
+    subgraph "SIP Calls"
+        C1[Call 1: Main]
+        C2[Call 2: Screen]
+    end
+    
+    subgraph "FreeSWITCH Conferences"
+        M[room-abc-main<br/>video-main profile<br/>720p@30fps, 1mb]
+        S[room-abc-screen<br/>video-screen profile<br/>1080p@15fps, 2mb]
+    end
+    
+    subgraph "Other Participants"
+        B[Participant B]
+        C[Participant C]
+        D[Participant D]
+    end
+    
+    A1 --> C1
+    A3 --> C1
+    C1 --> M
+    
+    A2 --> C2
+    C2 --> S
+    
+    M --> B
+    M --> C
+    M --> D
+    
+    S --> B
+    S --> C
+    S --> D
+    
+    style C2 fill:#f9f,stroke:#333,stroke-width:2px
+    style S fill:#f9f,stroke:#333,stroke-width:2px
+```
+
+**Component Interaction:**
+
+```mermaid
+graph LR
+    subgraph "Frontend Services"
+        MS[MediaService<br/>Mode: verto]
+        VS[VertoService]
+    end
+    
+    subgraph "Verto State"
+        MC[mainCallId]
+        SC[screenCallId]
+        MP[mainPeerConnection]
+        SP[screenPeerConnection]
+    end
+    
+    subgraph "FreeSWITCH"
+        DP[Dialplan]
+        VM[video-main<br/>Conference]
+        VS2[video-screen<br/>Conference]
+    end
+    
+    MS -->|setScreenTrack| VS
+    VS -->|joinMainConference| MC
+    VS -->|startScreenShare| SC
+    MC --> MP
+    SC --> SP
+    MP -->|INVITE main| DP
+    SP -->|INVITE screen| DP
+    DP -->|route| VM
+    DP -->|route| VS2
+    
+    style SC fill:#f9f,stroke:#333,stroke-width:2px
+    style SP fill:#f9f,stroke:#333,stroke-width:2px
+    style VS2 fill:#f9f,stroke:#333,stroke-width:2px
 ```
 
 ---
