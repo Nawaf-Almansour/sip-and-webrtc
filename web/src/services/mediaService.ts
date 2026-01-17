@@ -189,6 +189,14 @@ class MediaService {
     }
     return null;
   }
+
+  async replaceVideoTrack(newTrack: MediaStreamTrack): Promise<void> {
+    if (this.mode === 'webrtc') {
+      await webrtcService.replaceVideoTrack(newTrack);
+    } else if (this.mode === 'verto') {
+      await vertoService.replaceVideoTrack(newTrack);
+    }
+  }
 }
 
 export const mediaService = new MediaService();

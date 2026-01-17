@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { Video, Users, X } from 'lucide-react';
 
 export default function Home() {
   const navigate = useNavigate();
@@ -58,16 +59,16 @@ export default function Home() {
           <button
             onClick={handleStartCall}
             disabled={loading}
-            className="w-full sm:w-auto px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium"
+            className="w-full sm:w-auto px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium flex items-center gap-2 justify-center"
           >
-            📞 Start 1:1 Call
+            <Video size={24} /> Start 1-on-1 Call
           </button>
           <button
             onClick={handleCreateMeeting}
             disabled={loading}
-            className="w-full sm:w-auto px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 font-medium"
+            className="px-8 py-4 bg-green-600 text-white rounded-lg hover:bg-green-700 text-lg font-semibold disabled:opacity-50 flex items-center gap-2 justify-center"
           >
-            👥 Create Meeting Room
+            <Users size={24} /> Create Meeting Room
           </button>
         </div>
         <div className="mt-8 pt-8 border-t border-gray-700">
@@ -78,9 +79,12 @@ export default function Home() {
       {showNameModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-gray-800 rounded-lg p-6 w-96 shadow-xl">
-            <h2 className="text-xl font-semibold text-white mb-4">
-              {pendingAction === 'call' ? 'Join Call' : 'Join Meeting'}
-            </h2>
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-xl font-semibold text-white">
+                {pendingAction === 'call' ? 'Join Call' : 'Join Meeting'}
+              </h2>
+              <button onClick={() => setShowNameModal(false)} className="text-gray-400 hover:text-white"><X size={24} /></button>
+            </div>
             <p className="text-gray-400 mb-4">Please enter your name to continue</p>
             <input
               type="text"

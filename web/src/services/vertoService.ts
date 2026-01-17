@@ -446,6 +446,24 @@ class VertoService {
     return this.localStream;
   }
 
+  async replaceVideoTrack(newTrack: MediaStreamTrack): Promise<void> {
+    if (!this.peerConnection) {
+      console.warn('[Verto] No peer connection available to replace track');
+      return;
+    }
+
+    console.log('[Verto] Replacing video track');
+    const senders = this.peerConnection.getSenders();
+    const videoSender = senders.find(sender => sender.track?.kind === 'video');
+    
+    if (videoSender) {
+      await videoSender.replaceTrack(newTrack);
+      console.log('[Verto] Video track replaced successfully');
+    } else {
+      console.warn('[Verto] No video sender found');
+    }
+  }
+
   private generateUUID(): string {
     return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
       const r = Math.random() * 16 | 0;

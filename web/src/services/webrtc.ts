@@ -242,6 +242,28 @@ export class WebRTCService {
     return firstEntry.done ? null : firstEntry.value.pc;
   }
 
+  async replaceVideoTrack(newTrack: MediaStreamTrack) {
+    console.log('[WebRTC] Replacing video track in all peer connections');
+    const promises: Promise<void>[] = [];
+
+    this.peerConnections.forEach((peerConnection) => {
+      const senders = peerConnection.pc.getSenders();
+      const videoSender = senders.find(sender => sender.track?.kind === 'video');
+      
+      if (videoSender) {
+        promises.push(
+          videoSender.replaceTrack(newTrack).then(() => {
+            console.log('[WebRTC] Video track replaced successfully');
+          }).catch(err => {
+            console.error('[WebRTC] Failed to replace track:', err);
+          })
+        );
+      }
+    });
+
+    await Promise.all(promises);
+  }
+
   disconnect() {
     this.peerConnections.forEach((pc) => {
       pc.pc.close();

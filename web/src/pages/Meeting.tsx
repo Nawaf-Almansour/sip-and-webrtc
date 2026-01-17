@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
+import { Mic, MicOff, Video, VideoOff, Monitor, Link2, PhoneOff, Users, Settings, MessageSquare, Grid3x3, Maximize, PanelRight, X } from 'lucide-react';
 import VideoGrid, { LayoutType } from '../components/VideoGrid';
 import MeetingQuality from '../components/MeetingQuality';
 import { mediaService, ConnectionMode } from '../services/mediaService';
@@ -354,21 +355,25 @@ export default function Meeting() {
   const toggleScreenShare = async () => {
     if (isScreenSharing) {
       // Stop screen sharing and restore camera
-      if (localStreamRef.current) {
-        localStreamRef.current.getVideoTracks().forEach(track => track.stop());
-      }
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
         const videoTrack = stream.getVideoTracks()[0];
+        
         if (localStreamRef.current) {
           const oldVideoTrack = localStreamRef.current.getVideoTracks()[0];
           if (oldVideoTrack) {
+            oldVideoTrack.stop();
             localStreamRef.current.removeTrack(oldVideoTrack);
           }
           localStreamRef.current.addTrack(videoTrack);
         }
+        
+        // Replace track in all peer connections
+        await mediaService.replaceVideoTrack(videoTrack);
+        
         setLocalStream(localStreamRef.current);
         setIsScreenSharing(false);
+        console.log('[Meeting] Restored camera view');
       } catch (err) {
         console.error('Failed to restore camera:', err);
       }
@@ -378,7 +383,9 @@ export default function Meeting() {
         const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
         const screenTrack = screenStream.getVideoTracks()[0];
         
+        // Handle when user stops sharing via browser UI
         screenTrack.onended = () => {
+          console.log('[Meeting] Screen share ended by user');
           toggleScreenShare();
         };
 
@@ -390,8 +397,13 @@ export default function Meeting() {
           }
           localStreamRef.current.addTrack(screenTrack);
         }
+        
+        // Replace track in all peer connections
+        await mediaService.replaceVideoTrack(screenTrack);
+        
         setLocalStream(localStreamRef.current);
         setIsScreenSharing(true);
+        console.log('[Meeting] Screen sharing started');
       } catch (err) {
         console.error('Failed to share screen:', err);
       }
@@ -448,7 +460,7 @@ export default function Meeting() {
                 onClick={() => setShowParticipants(false)}
                 className="text-gray-400 hover:text-white"
               >
-                ✕
+                <X size={20} />
               </button>
             </div>
             <ul className="space-y-2">
@@ -484,11 +496,11 @@ export default function Meeting() {
                     </div>
                   </div>
                   <div className="flex items-center space-x-1">
-                    <span className={`text-sm ${p.isMuted ? 'text-red-400' : 'text-green-400'}`} title={p.isMuted ? 'Muted' : 'Unmuted'}>
-                      {p.isMuted ? '🔇' : '🎤'}
+                    <span className={`${p.isMuted ? 'text-red-400' : 'text-green-400'}`} title={p.isMuted ? 'Muted' : 'Unmuted'}>
+                      {p.isMuted ? <MicOff size={16} /> : <Mic size={16} />}
                     </span>
-                    <span className={`text-sm ${p.isVideoOff ? 'text-red-400' : 'text-green-400'}`} title={p.isVideoOff ? 'Camera off' : 'Camera on'}>
-                      {p.isVideoOff ? '📷' : '🎥'}
+                    <span className={`${p.isVideoOff ? 'text-red-400' : 'text-green-400'}`} title={p.isVideoOff ? 'Camera off' : 'Camera on'}>
+                      {p.isVideoOff ? <VideoOff size={16} /> : <Video size={16} />}
                     </span>
                   </div>
                 </li>
@@ -508,35 +520,35 @@ export default function Meeting() {
             className={`p-3 rounded-full ${isMuted ? 'bg-red-600' : 'bg-gray-600'} text-white hover:opacity-80`}
             title={isMuted ? 'Unmute' : 'Mute'}
           >
-            {isMuted ? '🔇' : '🎤'}
+            {isMuted ? <MicOff size={20} /> : <Mic size={20} />}
           </button>
           <button
             onClick={toggleVideo}
             className={`p-3 rounded-full ${isVideoOff ? 'bg-red-600' : 'bg-gray-600'} text-white hover:opacity-80`}
             title={isVideoOff ? 'Turn on camera' : 'Turn off camera'}
           >
-            {isVideoOff ? '📷' : '🎥'}
+            {isVideoOff ? <VideoOff size={20} /> : <Video size={20} />}
           </button>
           <button
             onClick={toggleScreenShare}
             className={`p-3 rounded-full ${isScreenSharing ? 'bg-green-600' : 'bg-gray-600'} text-white hover:opacity-80`}
             title={isScreenSharing ? 'Stop sharing' : 'Share screen'}
           >
-            🖥️
+            <Monitor size={20} />
           </button>
           <button
             onClick={() => setShowShareModal(true)}
             className="p-3 rounded-full bg-blue-600 text-white hover:bg-blue-700"
             title="Share meeting link"
           >
-            🔗
+            <Link2 size={20} />
           </button>
           <button
             onClick={handleLeave}
             className="p-3 rounded-full bg-red-600 text-white hover:bg-red-700"
             title="Leave meeting"
           >
-            📞
+            <PhoneOff size={20} />
           </button>
           {!showParticipants && (
             <button
@@ -544,7 +556,7 @@ export default function Meeting() {
               className="p-3 rounded-full bg-gray-600 text-white hover:bg-gray-500"
               title="Show participants"
             >
-              👥
+              <Users size={20} />
             </button>
           )}
           {isHost && (
@@ -553,7 +565,7 @@ export default function Meeting() {
               className="p-3 rounded-full bg-purple-600 text-white hover:bg-purple-700"
               title="Host controls"
             >
-              ⚙️
+              <Settings size={20} />
             </button>
           )}
           <button
@@ -561,7 +573,7 @@ export default function Meeting() {
             className={`p-3 rounded-full ${showChat ? 'bg-blue-600' : 'bg-gray-600'} text-white hover:opacity-80 relative`}
             title="Chat"
           >
-            💬
+            <MessageSquare size={20} />
             {chatMessages.length > 0 && !showChat && (
               <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs w-5 h-5 rounded-full flex items-center justify-center">
                 {chatMessages.length > 9 ? '9+' : chatMessages.length}
@@ -577,27 +589,21 @@ export default function Meeting() {
               className={`p-2 rounded-full ${layout === 'grid' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white'}`}
               title="Grid view"
             >
-              <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
-                <path d="M3 4a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1H4a1 1 0 01-1-1V4zM3 12a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1H4a1 1 0 01-1-1v-4zM11 4a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1V4zM11 12a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z"/>
-              </svg>
+              <Grid3x3 size={20} />
             </button>
             <button
               onClick={() => setLayout('speaker')}
               className={`p-2 rounded-full ${layout === 'speaker' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white'}`}
               title="Speaker view"
             >
-              <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
-                <path d="M2 5a2 2 0 012-2h12a2 2 0 012 2v10a2 2 0 01-2 2H4a2 2 0 01-2-2V5z"/>
-              </svg>
+              <Maximize size={20} />
             </button>
             <button
               onClick={() => setLayout('sidebar')}
               className={`p-2 rounded-full ${layout === 'sidebar' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white'}`}
               title="Sidebar view"
             >
-              <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
-                <path d="M2 4a2 2 0 012-2h12a2 2 0 012 2v12a2 2 0 01-2 2H4a2 2 0 01-2-2V4zm2 0v12h5V4H4zm7 0v12h5V4h-5z"/>
-              </svg>
+              <PanelRight size={20} />
             </button>
           </div>
         </div>
@@ -608,7 +614,7 @@ export default function Meeting() {
         <div className="fixed bottom-24 right-4 w-80 h-96 bg-gray-800 rounded-lg shadow-xl flex flex-col z-40">
           <div className="p-3 border-b border-gray-700 flex justify-between items-center">
             <h3 className="text-white font-semibold">Chat</h3>
-            <button onClick={() => setShowChat(false)} className="text-gray-400 hover:text-white">✕</button>
+            <button onClick={() => setShowChat(false)} className="text-gray-400 hover:text-white"><X size={20} /></button>
           </div>
           <div className="flex-1 overflow-y-auto p-3 space-y-2">
             {chatMessages.map((msg) => (
@@ -677,9 +683,9 @@ export default function Meeting() {
               <h2 className="text-xl font-semibold text-white">Host Controls</h2>
               <button
                 onClick={() => setShowHostControls(false)}
-                className="text-gray-400 hover:text-white text-xl"
+                className="text-gray-400 hover:text-white"
               >
-                ✕
+                <X size={24} />
               </button>
             </div>
             <div className="space-y-3">
@@ -793,9 +799,9 @@ export default function Meeting() {
               <h2 className="text-xl font-semibold text-white">Share Meeting</h2>
               <button
                 onClick={() => setShowShareModal(false)}
-                className="text-gray-400 hover:text-white text-xl"
+                className="text-gray-400 hover:text-white"
               >
-                ✕
+                <X size={24} />
               </button>
             </div>
             <p className="text-gray-400 mb-4">Share this link with others to invite them to the meeting:</p>

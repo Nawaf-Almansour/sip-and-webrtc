@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { Signal, X } from 'lucide-react';
 
 interface QualityStats {
   bitrate: number;
@@ -198,9 +199,10 @@ export default function MeetingQuality({ peerConnection, localStream }: MeetingQ
     <div className="relative">
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="p-3 rounded-full bg-gray-600 text-white hover:bg-gray-500 relative"
+        className={`p-3 rounded-full ${getQualityColor()} text-white hover:opacity-80 relative`}
         title="Connection quality"
       >
+        <Signal size={20} />
         <div className="flex items-center space-x-1">
           {[1, 2, 3, 4].map((bar) => (
             <div
@@ -221,7 +223,7 @@ export default function MeetingQuality({ peerConnection, localStream }: MeetingQ
               onClick={() => setIsOpen(false)}
               className="text-gray-400 hover:text-white"
             >
-              ✕
+              <X size={20} />
             </button>
           </div>
 
