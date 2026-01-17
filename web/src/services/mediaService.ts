@@ -190,6 +190,18 @@ class MediaService {
     return null;
   }
 
+  async setCameraTrack(track: MediaStreamTrack | null): Promise<void> {
+    if (this.mode === 'webrtc') {
+      await webrtcService.setCameraTrack(track);
+    }
+  }
+
+  async setScreenTrack(track: MediaStreamTrack | null): Promise<void> {
+    if (this.mode === 'webrtc') {
+      await webrtcService.setScreenTrack(track);
+    }
+  }
+
   async replaceVideoTrack(newTrack: MediaStreamTrack): Promise<void> {
     if (this.mode === 'webrtc') {
       await webrtcService.replaceVideoTrack(newTrack);
