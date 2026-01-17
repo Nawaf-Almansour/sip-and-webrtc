@@ -29,24 +29,30 @@ model Call {
 }
 
 model Meeting {
-  id              String        @id @default(uuid())
-  status          MeetingStatus @default(ACTIVE)
-  maxParticipants Int           @default(10) @map("max_participants")
-  createdAt       DateTime      @default(now()) @map("created_at")
-  endedAt         DateTime?     @map("ended_at")
-  participants    Participant[]
+  id                  String        @id @default(uuid())
+  status              MeetingStatus @default(ACTIVE)
+  maxParticipants     Int           @default(10) @map("max_participants")
+  waitingRoomEnabled  Boolean       @default(false) @map("waiting_room_enabled")
+  createdAt           DateTime      @default(now()) @map("created_at")
+  endedAt             DateTime?     @map("ended_at")
+  participants        Participant[]
 
   @@map("meetings")
 }
 
 model Participant {
-  id          String    @id @default(uuid())
-  displayName String?   @map("display_name")
-  role        String    @default("participant")
-  callId      String?   @map("call_id")
-  meetingId   String?   @map("meeting_id")
-  joinedAt    DateTime  @default(now()) @map("joined_at")
-  leftAt      DateTime? @map("left_at")
+  id              String    @id @default(uuid())
+  displayName     String?   @map("display_name")
+  role            String    @default("participant")
+  status          String    @default("approved")
+  shortId         String?   @map("short_id")
+  connectionMode  String    @default("webrtc") @map("connection_mode")
+  isMuted         Boolean   @default(false) @map("is_muted")
+  isVideoOff      Boolean   @default(false) @map("is_video_off")
+  callId          String?   @map("call_id")
+  meetingId       String?   @map("meeting_id")
+  joinedAt        DateTime  @default(now()) @map("joined_at")
+  leftAt          DateTime? @map("left_at")
 
   call    Call?    @relation(fields: [callId], references: [id], onDelete: Cascade)
   meeting Meeting? @relation(fields: [meetingId], references: [id], onDelete: Cascade)

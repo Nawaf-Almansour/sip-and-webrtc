@@ -229,9 +229,22 @@ export class WebRTCService {
     }
   }
 
+  getPeerConnections(): Map<string, RTCPeerConnection> {
+    const connections = new Map<string, RTCPeerConnection>();
+    this.peerConnections.forEach((value, key) => {
+      connections.set(key, value.pc);
+    });
+    return connections;
+  }
+
+  getFirstPeerConnection(): RTCPeerConnection | null {
+    const firstEntry = this.peerConnections.values().next();
+    return firstEntry.done ? null : firstEntry.value.pc;
+  }
+
   disconnect() {
-    this.peerConnections.forEach((peerConn, id) => {
-      peerConn.pc.close();
+    this.peerConnections.forEach((pc) => {
+      pc.pc.close();
     });
     this.peerConnections.clear();
 

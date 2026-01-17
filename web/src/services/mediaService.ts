@@ -34,13 +34,12 @@ class MediaService {
     this.localStream = config.localStream;
     this.config = config;
 
-    console.log(`[MediaService] Connecting via ${this.mode.toUpperCase()}`);
+    console.log(`[MediaService] Connecting via ${this.mode.toUpperCase()} mode`);
+    console.log(`[MediaService] Using unified WebRTC P2P signaling for all participants`);
 
-    if (this.mode === 'verto' && config.vertoConfig) {
-      await this.connectVerto(config);
-    } else {
-      await this.connectWebRTC(config);
-    }
+    // Always use WebRTC P2P signaling for participant communication
+    // This allows WebRTC and Verto mode users to communicate with each other
+    await this.connectWebRTC(config);
 
     this.connected = true;
     config.callbacks.onConnected?.();
@@ -182,6 +181,13 @@ class MediaService {
       return vertoService.getLocalStream();
     }
     return this.localStream;
+  }
+
+  getPeerConnection(): RTCPeerConnection | null {
+    if (this.mode === 'webrtc') {
+      return webrtcService.getFirstPeerConnection();
+    }
+    return null;
   }
 }
 

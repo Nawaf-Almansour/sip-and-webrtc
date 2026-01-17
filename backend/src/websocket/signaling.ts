@@ -1,5 +1,6 @@
 import { WebSocketServer, WebSocket } from 'ws';
 import { Server } from 'http';
+import { query } from '../store/db.js';
 
 interface Client {
   id: string;
@@ -24,6 +25,20 @@ export function setupWebSocket(server: Server) {
         switch (message.type) {
           case 'join':
             clientId = message.participantId;
+            
+            // Remove existing client with same ID if exists (handles page refresh)
+            const existingClient = clients.get(clientId!);
+            if (existingClient) {
+              console.log(`Removing stale connection for client ${clientId}`);
+              if (existingClient.ws.readyState === WebSocket.OPEN) {
+                existingClient.ws.close();
+              }
+              const oldMeetingClients = meetings.get(existingClient.meetingId);
+              if (oldMeetingClients) {
+                oldMeetingClients.delete(clientId!);
+              }
+            }
+            
             const client: Client = {
               id: clientId!,
               meetingId: message.meetingId,
@@ -37,12 +52,14 @@ export function setupWebSocket(server: Server) {
             }
             meetings.get(message.meetingId)!.add(clientId!);
 
-            // Notify others in the meeting about new participant
-            broadcastToMeeting(message.meetingId, {
-              type: 'user-joined',
-              participantId: clientId,
-              displayName: message.displayName,
-            }, clientId!);
+            // Notify others in the meeting about new participant (only if not already there)
+            if (!existingClient) {
+              broadcastToMeeting(message.meetingId, {
+                type: 'user-joined',
+                participantId: clientId,
+                displayName: message.displayName,
+              }, clientId!);
+            }
 
             // Send list of existing participants to the new user
             const existingParticipants: { id: string; displayName: string }[] = [];
@@ -109,9 +126,9 @@ export function setupWebSocket(server: Server) {
       }
     });
 
-    ws.on('close', () => {
+    ws.on('close', async () => {
       if (clientId) {
-        handleClientLeave(clientId);
+        await handleClientLeave(clientId);
       }
     });
 
@@ -145,11 +162,20 @@ function sendToClient(clientId: string, message: any) {
   }
 }
 
-function handleClientLeave(clientId: string) {
+async function handleClientLeave(clientId: string) {
   const client = clients.get(clientId);
   if (!client) return;
 
   const meetingId = client.meetingId;
+  
+  // Update database to mark participant as left
+  try {
+    await query('UPDATE participants SET left_at = NOW() WHERE id = $1 AND meeting_id = $2 AND left_at IS NULL', [clientId, meetingId]);
+    console.log(`Database updated: Client ${clientId} marked as left`);
+  } catch (err) {
+    console.error('Error updating participant left_at:', err);
+  }
+  
   clients.delete(clientId);
 
   const meetingClients = meetings.get(meetingId);

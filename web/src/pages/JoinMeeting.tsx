@@ -37,7 +37,7 @@ export default function JoinMeeting() {
       const joinRes = await fetch(`/api/meetings/${meetingId}/join`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ displayName, role: 'participant' }),
+        body: JSON.stringify({ displayName, role: 'participant', connectionMode }),
       });
 
       if (!joinRes.ok) {
@@ -107,12 +107,21 @@ export default function JoinMeeting() {
               }`}
             >
               <div className="font-semibold">WebRTC P2P</div>
-              <div className="text-xs mt-1 opacity-75">Direct peer-to-peer connection (Recommended)</div>
+              <div className="text-xs mt-1 opacity-75">Direct peer-to-peer connection • Best for 2-4 participants</div>
+            </button>
+            <button
+              type="button"
+              onClick={() => setConnectionMode('verto')}
+              className={`p-3 rounded-lg border-2 transition-all ${
+                connectionMode === 'verto'
+                  ? 'border-purple-500 bg-purple-500/20 text-white'
+                  : 'border-gray-600 bg-gray-700 text-gray-400 hover:border-gray-500'
+              }`}
+            >
+              <div className="font-semibold">SIP/Verto</div>
+              <div className="text-xs mt-1 opacity-75">Server-based connection • Best for 5+ participants</div>
             </button>
           </div>
-          <p className="text-gray-500 text-xs mt-2">
-            Verto/FreeSWITCH mode requires x86_64 server for production use.
-          </p>
         </div>
 
         <div className="mb-4">

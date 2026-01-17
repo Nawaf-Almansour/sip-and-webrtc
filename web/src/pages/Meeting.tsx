@@ -1,7 +1,9 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
-import VideoGrid from '../components/VideoGrid';
+import VideoGrid, { LayoutType } from '../components/VideoGrid';
+import MeetingQuality from '../components/MeetingQuality';
 import { mediaService, ConnectionMode } from '../services/mediaService';
+import { useSpeakerDetection } from '../hooks/useSpeakerDetection';
 
 interface JoinData {
   sipUri: string;
@@ -20,6 +22,7 @@ interface Participant {
   shortId?: string;
   displayName: string;
   role: string;
+  connectionMode?: string;
   isMuted?: boolean;
   isVideoOff?: boolean;
   joinedAt: string;
@@ -53,6 +56,8 @@ export default function Meeting() {
   const [chatMessages, setChatMessages] = useState<{id: string; from: string; displayName: string; message: string; timestamp: string}[]>([]);
   const [chatInput, setChatInput] = useState('');
   const [waitingParticipants, setWaitingParticipants] = useState<{id: string; displayName: string; shortId: string}[]>([]);
+  const [peerConnection, setPeerConnection] = useState<RTCPeerConnection | null>(null);
+  const [layout, setLayout] = useState<LayoutType>('grid');
   const localStreamRef = useRef<MediaStream | null>(null);
   const hasJoinedRef = useRef(false);
   const webrtcConnectedRef = useRef(false);
@@ -89,9 +94,28 @@ export default function Meeting() {
       localStreamRef.current = stream;
       setLocalStream(stream);
       return stream;
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to get local media:', err);
-      setError('Failed to access camera/microphone. Please allow permissions.');
+      
+      let errorMessage = 'Failed to access camera/microphone. ';
+      
+      if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+        errorMessage += 'Permission denied. Please click the camera icon (🎥) in your browser\'s address bar and allow access to camera and microphone, then refresh the page.';
+      } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
+        errorMessage += 'No camera or microphone found. Please connect your devices and refresh the page.';
+      } else if (err.name === 'NotReadableError' || err.name === 'TrackStartError') {
+        errorMessage += 'Camera/microphone is already in use by another application. Please close other apps using your camera/microphone and refresh the page.';
+      } else if (err.name === 'OverconstrainedError') {
+        errorMessage += 'Camera/microphone constraints could not be satisfied. Please check your device settings.';
+      } else if (err.name === 'NotSupportedError') {
+        errorMessage += 'Your browser does not support camera/microphone access. Please use a modern browser like Chrome, Firefox, or Edge.';
+      } else if (err.name === 'TypeError') {
+        errorMessage += 'Camera/microphone access requires HTTPS. If accessing from another device, please use HTTPS or access from localhost.';
+      } else {
+        errorMessage += 'Please check your browser permissions and device settings.';
+      }
+      
+      setError(errorMessage);
       return null;
     }
   }, []);
@@ -130,13 +154,23 @@ export default function Meeting() {
     const joinMeeting = async () => {
       try {
         hasJoinedRef.current = true;
-        await startLocalMedia();
+        const stream = await startLocalMedia();
+        
+        if (!stream) {
+          throw new Error('Failed to get camera/microphone access');
+        }
+
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 30000);
 
         const res = await fetch(`/api/meetings/${meetingId}/join`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ displayName, role }),
+          body: JSON.stringify({ displayName, role, connectionMode }),
+          signal: controller.signal,
         });
+        
+        clearTimeout(timeoutId);
 
         if (!res.ok) {
           hasJoinedRef.current = false;
@@ -179,6 +213,7 @@ export default function Meeting() {
                   newMap.delete(participantId);
                   return newMap;
                 });
+                setParticipants(prev => prev.filter(p => p.id !== participantId));
                 addNotification('A participant left the meeting', 'leave');
               },
               onParticipantJoined: (participantId: string, name: string) => {
@@ -198,8 +233,20 @@ export default function Meeting() {
                 console.error('Media service error:', error);
                 setError(error.message);
               },
+              onConnected: () => {
+                console.log('[Meeting] Media service connected');
+              },
             },
           });
+          
+          // Get peer connection for quality monitoring after connection is established
+          setTimeout(() => {
+            const pc = mediaService.getPeerConnection();
+            console.log('[Meeting] Peer connection retrieved:', pc ? 'Available' : 'Not available');
+            if (pc) {
+              setPeerConnection(pc);
+            }
+          }, 3000);
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Unknown error');
@@ -271,8 +318,13 @@ export default function Meeting() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ isMuted: newIsMuted, isVideoOff: newIsVideoOff }),
         });
-      } catch (err) {
-        console.error('Failed to update status:', err);
+      } catch (error: any) {
+        console.error('Failed to update status:', error);
+        if (error.name === 'AbortError') {
+          setError('Request timeout. Please check your connection and try again.');
+        } else {
+          setError(error.message || 'Failed to update status. Please try again.');
+        }
       }
     }
   };
@@ -368,11 +420,24 @@ export default function Meeting() {
     stream: p.id === joinData?.participantId ? undefined : remoteStreams.get(p.id),
   }));
 
+  // Speaker detection (after videoParticipants is defined)
+  const activeSpeakerId = useSpeakerDetection(
+    videoParticipants,
+    localStream,
+    0.1
+  );
+
   return (
     <div className="min-h-screen bg-gray-900 flex flex-col">
       <div className="flex-1 flex">
         <div className="flex-1 p-4">
-          <VideoGrid participants={videoParticipants} localStream={localStream} remoteStreams={remoteStreams} />
+          <VideoGrid 
+            participants={videoParticipants} 
+            localStream={localStream} 
+            remoteStreams={remoteStreams}
+            layout={layout}
+            activeSpeakerId={activeSpeakerId}
+          />
         </div>
 
         {showParticipants && (
@@ -407,7 +472,16 @@ export default function Meeting() {
                         <span className="text-blue-400 ml-1">(You)</span>
                       )}
                     </div>
-                    <div className="text-gray-400 text-xs capitalize">{p.role}</div>
+                    <div className="flex items-center gap-2">
+                      <div className="text-gray-400 text-xs capitalize">{p.role}</div>
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded ${
+                        p.connectionMode === 'verto' 
+                          ? 'bg-purple-500/20 text-purple-300' 
+                          : 'bg-blue-500/20 text-blue-300'
+                      }`}>
+                        {p.connectionMode === 'verto' ? 'SIP' : 'WebRTC'}
+                      </span>
+                    </div>
                   </div>
                   <div className="flex items-center space-x-1">
                     <span className={`text-sm ${p.isMuted ? 'text-red-400' : 'text-green-400'}`} title={p.isMuted ? 'Muted' : 'Unmuted'}>
@@ -494,6 +568,38 @@ export default function Meeting() {
               </span>
             )}
           </button>
+          <MeetingQuality peerConnection={peerConnection} localStream={localStream} />
+          
+          {/* Layout Selector */}
+          <div className="flex gap-1 bg-gray-700 rounded-full p-1">
+            <button
+              onClick={() => setLayout('grid')}
+              className={`p-2 rounded-full ${layout === 'grid' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white'}`}
+              title="Grid view"
+            >
+              <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                <path d="M3 4a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1H4a1 1 0 01-1-1V4zM3 12a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1H4a1 1 0 01-1-1v-4zM11 4a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1V4zM11 12a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z"/>
+              </svg>
+            </button>
+            <button
+              onClick={() => setLayout('speaker')}
+              className={`p-2 rounded-full ${layout === 'speaker' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white'}`}
+              title="Speaker view"
+            >
+              <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                <path d="M2 5a2 2 0 012-2h12a2 2 0 012 2v10a2 2 0 01-2 2H4a2 2 0 01-2-2V5z"/>
+              </svg>
+            </button>
+            <button
+              onClick={() => setLayout('sidebar')}
+              className={`p-2 rounded-full ${layout === 'sidebar' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white'}`}
+              title="Sidebar view"
+            >
+              <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                <path d="M2 4a2 2 0 012-2h12a2 2 0 012 2v12a2 2 0 01-2 2H4a2 2 0 01-2-2V4zm2 0v12h5V4H4zm7 0v12h5V4h-5z"/>
+              </svg>
+            </button>
+          </div>
         </div>
       </div>
 

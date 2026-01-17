@@ -1,6 +1,16 @@
 version: '3.8'
 
 services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
   postgres:
     image: postgres:16-alpine
     environment:
@@ -9,25 +19,83 @@ services:
       POSTGRES_DB: sip_meetings
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./backend/src/store/schema.sql:/docker-entrypoint-initdb.d/schema.sql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 5s
       timeout: 5s
       retries: 5
 
+  coturn:
+    image: coturn/coturn:4.6.2-alpine
+    ports:
+      - "3478:3478/udp"
+      - "3478:3478/tcp"
+      - "5349:5349/tcp"
+      - "49152-49252:49152-49252/udp"
+    command: >
+      -n
+      --log-file=stdout
+      --min-port=49152
+      --max-port=49252
+      --realm=localhost
+      --user=turnuser:turnpassword
+      --lt-cred-mech
+      --fingerprint
+      --no-tlsv1
+      --no-tlsv1_1
+    restart: unless-stopped
+
+  freeswitch:
+    image: safarov/freeswitch:latest
+    ports:
+      - "5060:5060/udp"
+      - "5060:5060/tcp"
+      - "5066:5066/tcp"
+      - "7443:7443/tcp"
+      - "8021:8021/tcp"
+      - "16384-16484:16384-16484/udp"
+    environment:
+      - FREESWITCH_DOMAIN=localhost
+      - OTEL_EXPORTER_OTLP_ENDPOINT=
+    healthcheck:
+      disable: true
+    restart: unless-stopped
+    depends_on:
+      - redis
+
+  drachtio:
+    image: drachtio/drachtio-server:latest
+    ports:
+      - "9022:9022/tcp"
+      - "5062:5062/udp"
+      - "5062:5062/tcp"
+    command: drachtio --contact "sip:*:5062;transport=udp,tcp" --loglevel info
+    restart: unless-stopped
+    depends_on:
+      - freeswitch
+
   backend:
     build:
       context: .
       dockerfile: Dockerfile.backend
+    ports:
+      - "3000:3000"
     environment:
       NODE_ENV: production
       PORT: 3000
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/sip_meetings
-      SIP_DOMAIN: sip.example.com
-      SIP_WSS_URL: wss://sip.example.com:7443
+      REDIS_URL: redis://redis:6379
+      ENABLE_SIP: "true"
+      DRACHTIO_HOST: drachtio
+      DRACHTIO_PORT: 9022
+      DRACHTIO_SECRET: cymru
+      FREESWITCH_HOST: freeswitch
+      FREESWITCH_ESL_PORT: 8021
+      FREESWITCH_ESL_PASSWORD: ClueCon
+      SIP_DOMAIN: 192.168.100.218
+      WSS_URL: wss://192.168.100.218/ws
       STUN_URL: stun:stun.l.google.com:19302
-      TURN_URL: turn:turn.example.com:3478
+      TURN_URL: turn:localhost:3478
       TURN_USERNAME: turnuser
       TURN_PASSWORD: turnpassword
       TOKEN_SECRET: your-secret-key-change-in-production
@@ -35,6 +103,14 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      redis:
+        condition: service_healthy
+      coturn:
+        condition: service_started
+      drachtio:
+        condition: service_started
+      freeswitch:
+        condition: service_started
     restart: unless-stopped
 
   frontend:
@@ -43,6 +119,10 @@ services:
       dockerfile: Dockerfile.frontend
     ports:
       - "80:80"
+      - "443:443"
+    volumes:
+      - ./ssl.crt:/etc/nginx/ssl/ssl.crt:ro
+      - ./ssl.key:/etc/nginx/ssl/ssl.key:ro
     depends_on:
       - backend
     restart: unless-stopped

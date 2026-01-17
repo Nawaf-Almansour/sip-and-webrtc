@@ -6,6 +6,7 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [showNameModal, setShowNameModal] = useState(false);
   const [displayName, setDisplayName] = useState('');
+  const [connectionMode, setConnectionMode] = useState<'webrtc' | 'verto'>('webrtc');
   const [pendingAction, setPendingAction] = useState<'call' | 'meeting' | null>(null);
 
   const handleStartCall = () => {
@@ -28,11 +29,11 @@ export default function Home() {
       if (pendingAction === 'call') {
         const res = await fetch('/api/calls', { method: 'POST' });
         const data = await res.json();
-        navigate(`/call/${data.callId}?role=A&name=${encodeURIComponent(displayName)}`);
+        navigate(`/call/${data.callId}?role=A&name=${encodeURIComponent(displayName)}&mode=${connectionMode}`);
       } else if (pendingAction === 'meeting') {
         const res = await fetch('/api/meetings', { method: 'POST' });
         const data = await res.json();
-        navigate(`/meeting/${data.meetingId}?name=${encodeURIComponent(displayName)}&role=host`);
+        navigate(`/meeting/${data.meetingId}?name=${encodeURIComponent(displayName)}&role=host&mode=${connectionMode}`);
       }
     } catch (error) {
       console.error('Failed to create:', error);
@@ -90,6 +91,39 @@ export default function Home() {
               className="w-full px-4 py-2 bg-gray-700 text-white rounded-lg border border-gray-600 focus:border-blue-500 focus:outline-none mb-4"
               autoFocus
             />
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-gray-300 mb-2">Connection Mode</label>
+              <div className="space-y-2">
+                <label className="flex items-center p-3 bg-gray-700 rounded-lg cursor-pointer hover:bg-gray-600 transition">
+                  <input
+                    type="radio"
+                    name="connectionMode"
+                    value="webrtc"
+                    checked={connectionMode === 'webrtc'}
+                    onChange={(e) => setConnectionMode(e.target.value as 'webrtc' | 'verto')}
+                    className="mr-3"
+                  />
+                  <div className="flex-1">
+                    <div className="text-white font-medium">WebRTC P2P</div>
+                    <div className="text-gray-400 text-xs">Direct connection • Best for 2-4 participants</div>
+                  </div>
+                </label>
+                <label className="flex items-center p-3 bg-gray-700 rounded-lg cursor-pointer hover:bg-gray-600 transition">
+                  <input
+                    type="radio"
+                    name="connectionMode"
+                    value="verto"
+                    checked={connectionMode === 'verto'}
+                    onChange={(e) => setConnectionMode(e.target.value as 'webrtc' | 'verto')}
+                    className="mr-3"
+                  />
+                  <div className="flex-1">
+                    <div className="text-white font-medium">SIP/Verto</div>
+                    <div className="text-gray-400 text-xs">Server-based • Best for 5+ participants</div>
+                  </div>
+                </label>
+              </div>
+            </div>
             <div className="flex space-x-3">
               <button
                 onClick={() => {

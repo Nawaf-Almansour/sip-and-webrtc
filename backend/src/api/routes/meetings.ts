@@ -29,7 +29,7 @@ router.post('/', async (req, res) => {
 router.post('/:id/join', async (req, res) => {
   try {
     const { id } = req.params;
-    const { role = 'participant', displayName = 'Guest' } = req.body;
+    const { displayName, role = 'participant', connectionMode = 'webrtc' } = req.body;
 
     const result = await query('SELECT * FROM meetings WHERE id = $1', [id]);
     if (result.rows.length === 0) {
@@ -48,16 +48,35 @@ router.post('/:id/join', async (req, res) => {
       return res.status(409).json({ error: 'Meeting is full' });
     }
 
-    const participantId = uuidv4();
-    const shortId = Math.random().toString(36).substring(2, 8).toUpperCase();
-    
-    // Check if waiting room is enabled and user is not host
-    const participantStatus = (meeting.waiting_room_enabled && role !== 'host') ? 'waiting' : 'approved';
-    
-    await query(
-      'INSERT INTO participants (id, display_name, role, meeting_id, short_id, status) VALUES ($1, $2, $3, $4, $5, $6)',
-      [participantId, displayName, role, id, shortId, participantStatus]
+    // Check if participant already exists and is still active (for browser refresh case)
+    const existingParticipant = await query(
+      'SELECT * FROM participants WHERE meeting_id = $1 AND display_name = $2 AND role = $3 AND left_at IS NULL ORDER BY joined_at DESC LIMIT 1',
+      [id, displayName, role]
     );
+
+    let participantId: string;
+    let shortId: string;
+    let participantStatus: string;
+
+    if (existingParticipant.rows.length > 0) {
+      // Reuse existing participant (browser refresh case)
+      const existing = existingParticipant.rows[0];
+      participantId = existing.id;
+      shortId = existing.short_id;
+      participantStatus = existing.status;
+      console.log(`Reusing existing participant ${participantId} for ${displayName}`);
+    } else {
+      // Create new participant
+      participantId = uuidv4();
+      shortId = Math.random().toString(36).substring(2, 8).toUpperCase();
+      participantStatus = (meeting.waiting_room_enabled && role !== 'host') ? 'waiting' : 'approved';
+      
+      await query(
+        'INSERT INTO participants (id, display_name, role, meeting_id, short_id, status, connection_mode) VALUES ($1, $2, $3, $4, $5, $6, $7)',
+        [participantId, displayName, role, id, shortId, participantStatus, connectionMode]
+      );
+      console.log(`Created new participant ${participantId} for ${displayName}`);
+    }
 
     const token = await createJoinToken('meeting', id, role);
 
@@ -147,6 +166,7 @@ router.get('/:id/participants', async (req, res) => {
         shortId: p.short_id,
         displayName: p.display_name,
         role: p.role,
+        connectionMode: p.connection_mode,
         isMuted: p.is_muted,
         isVideoOff: p.is_video_off,
         joinedAt: p.joined_at,
