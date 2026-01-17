@@ -50,6 +50,13 @@ class VertoService {
   private reconnectAttempts = 0;
   private maxReconnectAttempts = 3;
   private heartbeatInterval: ReturnType<typeof setInterval> | null = null;
+  
+  // Phase 2: Dual session support
+  private mainCallId: string | null = null;
+  private screenCallId: string | null = null;
+  private mainPeerConnection: RTCPeerConnection | null = null;
+  private screenPeerConnection: RTCPeerConnection | null = null;
+  private screenStream: MediaStream | null = null;
 
   async connect(config: VertoConfig, callbacks: VertoCallbacks = {}): Promise<void> {
     this.config = config;
@@ -462,6 +469,129 @@ class VertoService {
     } else {
       console.warn('[Verto] No video sender found');
     }
+  }
+
+  // Phase 2: Join main conference (audio + camera)
+  async joinMainConference(meetingId: string, localStream: MediaStream): Promise<void> {
+    console.log('[Verto] Joining main conference:', meetingId);
+    this.localStream = localStream;
+    const destination = `room-${meetingId}-main`;
+    
+    // Use existing call method but store as main call
+    await this.call(destination, localStream);
+    this.mainCallId = this.callId;
+    this.mainPeerConnection = this.peerConnection;
+  }
+
+  // Phase 2: Start screen share (separate call)
+  async startScreenShare(meetingId: string, screenStream: MediaStream): Promise<{ success: boolean; error?: string }> {
+    if (this.screenCallId) {
+      console.warn('[Verto] Screen share already active');
+      return { success: false, error: 'Already sharing' };
+    }
+
+    console.log('[Verto] Starting screen share');
+    this.screenStream = screenStream;
+    const destination = `room-${meetingId}-screen`;
+
+    try {
+      // Create separate peer connection for screen
+      const iceServers = this.config?.turnConfig ? [
+        { urls: 'stun:stun.l.google.com:19302' },
+        {
+          urls: this.config.turnConfig.urls,
+          username: this.config.turnConfig.username,
+          credential: this.config.turnConfig.credential,
+        },
+      ] : [{ urls: 'stun:stun.l.google.com:19302' }];
+
+      this.screenPeerConnection = new RTCPeerConnection({ iceServers });
+
+      // Add only video track (no audio for screen share)
+      const videoTrack = screenStream.getVideoTracks()[0];
+      if (videoTrack) {
+        this.screenPeerConnection.addTrack(videoTrack, screenStream);
+      }
+
+      // Handle ICE candidates
+      this.screenPeerConnection.onicecandidate = (event) => {
+        if (event.candidate) {
+          console.log('[Verto] Screen share ICE candidate:', event.candidate);
+        }
+      };
+
+      // Create offer
+      const offer = await this.screenPeerConnection.createOffer();
+      await this.screenPeerConnection.setLocalDescription(offer);
+
+      // Send invite for screen share
+      this.screenCallId = this.generateUUID();
+      const result = await this.sendRequest('verto.invite', {
+        sessid: this.sessionId,
+        sdp: offer.sdp,
+        dialogParams: {
+          callID: this.screenCallId,
+          destination_number: destination,
+          caller_id_name: this.config?.callerIdName || 'Screen Share',
+          caller_id_number: this.config?.callerIdNumber || 'screen',
+          remote_caller_id_name: 'Conference',
+          remote_caller_id_number: destination,
+        },
+      });
+
+      console.log('[Verto] Screen share call initiated');
+      return { success: true };
+    } catch (error) {
+      console.error('[Verto] Failed to start screen share:', error);
+      this.screenCallId = null;
+      if (this.screenPeerConnection) {
+        this.screenPeerConnection.close();
+        this.screenPeerConnection = null;
+      }
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+    }
+  }
+
+  // Phase 2: Stop screen share
+  async stopScreenShare(): Promise<void> {
+    if (!this.screenCallId) {
+      console.warn('[Verto] No active screen share to stop');
+      return;
+    }
+
+    console.log('[Verto] Stopping screen share');
+
+    // Hangup screen share call
+    if (this.screenCallId) {
+      try {
+        await this.sendRequest('verto.bye', {
+          sessid: this.sessionId,
+          dialogParams: {
+            callID: this.screenCallId,
+          },
+        });
+      } catch (error) {
+        console.error('[Verto] Error hanging up screen share:', error);
+      }
+    }
+
+    // Clean up screen share resources
+    if (this.screenPeerConnection) {
+      this.screenPeerConnection.close();
+      this.screenPeerConnection = null;
+    }
+    if (this.screenStream) {
+      this.screenStream.getTracks().forEach(track => track.stop());
+      this.screenStream = null;
+    }
+    this.screenCallId = null;
+  }
+
+  // Phase 2: Subscribe to screen room (to see others' screens)
+  async subscribeToScreenRoom(meetingId: string): Promise<void> {
+    console.log('[Verto] Subscribing to screen room:', meetingId);
+    // This will be handled by FreeSWITCH conference automatically
+    // when someone joins the screen conference
   }
 
   private generateUUID(): string {

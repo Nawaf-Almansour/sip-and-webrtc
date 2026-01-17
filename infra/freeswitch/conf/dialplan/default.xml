@@ -11,13 +11,33 @@
       </condition>
     </extension>
     
-    <!-- Conference Room -->
+    <!-- Conference Room (Legacy) -->
     <extension name="conference-room">
       <condition field="destination_number" expression="^room-([a-f0-9-]+)$">
         <action application="set" data="meeting_id=$1"/>
         <action application="log" data="INFO Joining conference: ${meeting_id}"/>
         <action application="answer"/>
         <action application="conference" data="${meeting_id}@video-mcu-stereo"/>
+      </condition>
+    </extension>
+    
+    <!-- Phase 2: Main Conference (Audio + Camera) -->
+    <extension name="conference-main">
+      <condition field="destination_number" expression="^room-([a-f0-9-]+)-main$">
+        <action application="set" data="meeting_id=$1"/>
+        <action application="log" data="INFO Joining main conference: ${meeting_id}-main"/>
+        <action application="answer"/>
+        <action application="conference" data="${meeting_id}-main@video-main"/>
+      </condition>
+    </extension>
+    
+    <!-- Phase 2: Screen Share Conference (Screen Only) -->
+    <extension name="conference-screen">
+      <condition field="destination_number" expression="^room-([a-f0-9-]+)-screen$">
+        <action application="set" data="meeting_id=$1"/>
+        <action application="log" data="INFO Joining screen conference: ${meeting_id}-screen"/>
+        <action application="answer"/>
+        <action application="conference" data="${meeting_id}-screen@video-screen"/>
       </condition>
     </extension>
     

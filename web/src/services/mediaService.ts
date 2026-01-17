@@ -194,11 +194,34 @@ class MediaService {
     if (this.mode === 'webrtc') {
       await webrtcService.setCameraTrack(track);
     }
+    // Verto mode: Camera is part of main conference, no separate track management needed
   }
 
   async setScreenTrack(track: MediaStreamTrack | null): Promise<void> {
     if (this.mode === 'webrtc') {
       await webrtcService.setScreenTrack(track);
+    } else if (this.mode === 'verto') {
+      // Phase 2: Verto screen share via separate call
+      if (track && this.config) {
+        const screenStream = new MediaStream([track]);
+        await vertoService.startScreenShare(this.config.meetingId, screenStream);
+      } else {
+        await vertoService.stopScreenShare();
+      }
+    }
+  }
+
+  // Phase 2: Join main conference for Verto mode
+  async joinMainConference(meetingId: string, localStream: MediaStream): Promise<void> {
+    if (this.mode === 'verto') {
+      await vertoService.joinMainConference(meetingId, localStream);
+    }
+  }
+
+  // Phase 2: Subscribe to screen room for Verto mode
+  async subscribeToScreenRoom(meetingId: string): Promise<void> {
+    if (this.mode === 'verto') {
+      await vertoService.subscribeToScreenRoom(meetingId);
     }
   }
 

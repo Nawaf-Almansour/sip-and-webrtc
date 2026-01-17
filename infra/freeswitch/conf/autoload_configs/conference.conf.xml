@@ -43,6 +43,72 @@
       <param name="interval" value="20"/>
       <param name="max-members" value="50"/>
     </profile>
+    
+    <!-- Phase 2: Main Conference Profile (Audio + Camera) -->
+    <profile name="video-main">
+      <param name="domain" value="$${domain}"/>
+      <param name="rate" value="48000"/>
+      <param name="interval" value="20"/>
+      <param name="energy-level" value="100"/>
+      
+      <!-- Audio Settings -->
+      <param name="sound-prefix" value="$${sounds_dir}/en/us/callie"/>
+      <param name="muted-sound" value="conference/conf-muted.wav"/>
+      <param name="unmuted-sound" value="conference/conf-unmuted.wav"/>
+      <param name="enter-sound" value="tone_stream://%(200,0,500,600,700)"/>
+      <param name="exit-sound" value="tone_stream://%(500,0,300,200,100,50,25)"/>
+      
+      <!-- Video Settings for Camera Streams -->
+      <param name="video-mode" value="mux"/>
+      <param name="video-layout-name" value="group:grid"/>
+      <param name="video-canvas-size" value="1280x720"/>
+      <param name="video-canvas-bgcolor" value="#333333"/>
+      <param name="video-layout-bgcolor" value="#000000"/>
+      <param name="video-codec-bandwidth" value="1mb"/>
+      <param name="video-fps" value="30"/>
+      
+      <!-- Conference Settings -->
+      <param name="max-members" value="50"/>
+      <param name="caller-controls" value="default"/>
+      <param name="moderator-controls" value="default"/>
+      <param name="member-flags" value="video-bridge"/>
+      <param name="conference-flags" value="video-floor-only|rfc-4579|livearray-sync|minimize-video-encoding"/>
+      
+      <!-- Recording -->
+      <param name="auto-record" value="false"/>
+    </profile>
+    
+    <!-- Phase 2: Screen Share Conference Profile (Screen Only) -->
+    <profile name="video-screen">
+      <param name="domain" value="$${domain}"/>
+      <param name="rate" value="48000"/>
+      <param name="interval" value="20"/>
+      <param name="energy-level" value="100"/>
+      
+      <!-- No audio sounds for screen share conference -->
+      <param name="sound-prefix" value="$${sounds_dir}/en/us/callie"/>
+      <param name="enter-sound" value="silence_stream://100"/>
+      <param name="exit-sound" value="silence_stream://100"/>
+      
+      <!-- Video Settings for Screen Share -->
+      <param name="video-mode" value="mux"/>
+      <param name="video-layout-name" value="presenter"/>
+      <param name="video-canvas-size" value="1920x1080"/>
+      <param name="video-canvas-bgcolor" value="#000000"/>
+      <param name="video-layout-bgcolor" value="#000000"/>
+      <param name="video-codec-bandwidth" value="2mb"/>
+      <param name="video-fps" value="15"/>
+      <param name="video-rtp-jitter-msec" value="50"/>
+      
+      <!-- Conference Settings -->
+      <param name="max-members" value="10"/>
+      <param name="caller-controls" value="default"/>
+      <param name="member-flags" value="video-bridge"/>
+      <param name="conference-flags" value="video-floor-only|rfc-4579|livearray-sync|minimize-video-encoding"/>
+      
+      <!-- Recording -->
+      <param name="auto-record" value="false"/>
+    </profile>
   </profiles>
   
   <!-- Caller Controls -->
