@@ -510,6 +510,104 @@
   - [ ] Adaptive bitrate (optional)
   - [ ] Reconnection logic
 
+### 3.1.1 Backend Metrics Tracking (Optional)
+
+**File:** `backend/src/services/metricsService.ts`
+
+> **Note:** Not required for MVP, but useful for analytics and monitoring
+
+- [ ] **Screen Share Metrics**
+  ```typescript
+  interface ScreenShareMetrics {
+    event: 'screen_share_started' | 'screen_share_stopped' | 'screen_share_conflict';
+    meetingId: string;
+    participantId: string;
+    participantName: string;
+    timestamp: Date;
+    duration?: number;  // seconds (for stopped event)
+    conflictWith?: string;  // participantId (for conflict event)
+  }
+  ```
+
+- [ ] **Track screen share events**
+  - [ ] `screen_share_started` - When user starts sharing
+  - [ ] `screen_share_stopped` - When user stops sharing
+  - [ ] `screen_share_duration` - Calculate duration on stop
+  - [ ] `screen_share_conflicts` - When 409 Conflict occurs
+
+- [ ] **Store metrics** (choose one)
+  - [ ] Database table (PostgreSQL)
+  - [ ] Time-series database (InfluxDB, TimescaleDB)
+  - [ ] Analytics service (Google Analytics, Mixpanel)
+  - [ ] Log aggregation (ELK stack, CloudWatch)
+
+- [ ] **Example implementation**
+  ```typescript
+  class MetricsService {
+    async recordScreenShareStart(meetingId: string, participantId: string, participantName: string) {
+      await prisma.screenShareMetric.create({
+        data: {
+          event: 'screen_share_started',
+          meetingId,
+          participantId,
+          participantName,
+          timestamp: new Date()
+        }
+      });
+    }
+    
+    async recordScreenShareStop(meetingId: string, participantId: string, duration: number) {
+      await prisma.screenShareMetric.create({
+        data: {
+          event: 'screen_share_stopped',
+          meetingId,
+          participantId,
+          timestamp: new Date(),
+          duration
+        }
+      });
+    }
+    
+    async recordScreenShareConflict(meetingId: string, requesterId: string, activeSharerId: string) {
+      await prisma.screenShareMetric.create({
+        data: {
+          event: 'screen_share_conflict',
+          meetingId,
+          participantId: requesterId,
+          conflictWith: activeSharerId,
+          timestamp: new Date()
+        }
+      });
+    }
+  }
+  ```
+
+- [ ] **Analytics queries** (examples)
+  ```sql
+  -- Average screen share duration per meeting
+  SELECT AVG(duration) FROM screen_share_metrics WHERE event = 'screen_share_stopped';
+  
+  -- Most active screen sharers
+  SELECT participant_name, COUNT(*) as share_count 
+  FROM screen_share_metrics 
+  WHERE event = 'screen_share_started' 
+  GROUP BY participant_name 
+  ORDER BY share_count DESC;
+  
+  -- Screen share conflict rate
+  SELECT 
+    COUNT(CASE WHEN event = 'screen_share_conflict' THEN 1 END) * 100.0 / 
+    COUNT(CASE WHEN event = 'screen_share_started' THEN 1 END) as conflict_rate
+  FROM screen_share_metrics;
+  ```
+
+**Benefits:**
+- 📊 Understand screen share usage patterns
+- 🔍 Identify frequent conflicts (may need UX improvements)
+- 📈 Track feature adoption
+- 🐛 Debug production issues
+- 💡 Data-driven feature decisions
+
 ### 3.2 UI/UX Polish
 
 - [ ] **Visual Feedback**
