@@ -1232,4 +1232,392 @@ Before deploying to production, verify:
 
 ---
 
+## 🔬 Final Production Polish (Engineering Best Practices)
+
+### 1. Use MID-Based Transceiver Binding (P2P)
+
+**Problem:** Browser can reorder transceivers, breaking track identification by index.
+
+**Solution:** Bind transceivers to MID (Media Stream ID) instead of relying on order.
+
+```typescript
+// ❌ WRONG - Relying on order
+const transceivers = pc.getTransceivers();
+const cameraTransceiver = transceivers[1];  // Fragile!
+
+// ✅ CORRECT - Use MID
+const AUDIO_MID = '0';
+const CAMERA_MID = '1';
+const SCREEN_MID = '2';
+
+class WebRTCService {
+  private transceiverMap = new Map<string, string>();  // MID -> type
+  
+  async createPeerConnection(remoteId: string) {
+    const pc = new RTCPeerConnection(config);
+    
+    // Add transceivers and store MID mapping
+    const audioTransceiver = pc.addTransceiver('audio', { direction: 'sendrecv' });
+    const cameraTransceiver = pc.addTransceiver('video', { direction: 'sendrecv' });
+    const screenTransceiver = pc.addTransceiver('video', { direction: 'sendrecv' });
+    
+    // After negotiation, MIDs are assigned
+    pc.addEventListener('negotiationneeded', () => {
+      this.transceiverMap.set(audioTransceiver.mid!, 'audio');
+      this.transceiverMap.set(cameraTransceiver.mid!, 'camera');
+      this.transceiverMap.set(screenTransceiver.mid!, 'screen');
+    });
+    
+    // Handle incoming tracks using MID
+    pc.ontrack = (event) => {
+      const trackType = this.transceiverMap.get(event.transceiver.mid!);
+      
+      if (trackType === 'camera') {
+        this.handleCameraTrack(remoteId, event.track);
+      } else if (trackType === 'screen') {
+        this.handleScreenTrack(remoteId, event.track);
+      }
+    };
+  }
+}
+```
+
+**Why this matters:**
+- ✅ Protects against browser reordering
+- ✅ More reliable than index-based lookup
+- ✅ Works consistently across Chrome/Firefox/Safari
+
+### 2. Don't Rely on `track.label` Alone
+
+**Problem:** Safari sometimes changes `track.label` unpredictably.
+
+**Solution:** Use `transceiver.mid` as primary identifier, `track.label` as fallback.
+
+```typescript
+// ❌ WRONG - Only using track.label
+pc.ontrack = (event) => {
+  if (event.track.label === 'camera') {  // Unreliable in Safari
+    handleCameraTrack(event.track);
+  }
+};
+
+// ✅ CORRECT - Use MID first, label as fallback
+pc.ontrack = (event) => {
+  const trackType = this.getTrackType(event.transceiver.mid, event.track.label);
+  
+  switch (trackType) {
+    case 'camera':
+      handleCameraTrack(event.track);
+      break;
+    case 'screen':
+      handleScreenTrack(event.track);
+      break;
+  }
+};
+
+private getTrackType(mid: string | null, label: string): string {
+  // Primary: Use MID mapping
+  if (mid && this.transceiverMap.has(mid)) {
+    return this.transceiverMap.get(mid)!;
+  }
+  
+  // Fallback: Use label (less reliable)
+  if (label.includes('camera')) return 'camera';
+  if (label.includes('screen')) return 'screen';
+  
+  return 'unknown';
+}
+```
+
+### 3. Add Jitter Buffer for Screen Share (FreeSWITCH)
+
+**Problem:** Screen share can have tearing/stuttering due to network jitter.
+
+**Solution:** Configure RTP jitter buffer in FreeSWITCH screen profile.
+
+```xml
+<!-- conference.conf.xml -->
+<profile name="video-screen">
+  <param name="video-mode" value="mux"/>
+  <param name="video-layout-name" value="presenter"/>
+  <param name="video-fps" value="15"/>
+  <param name="video-bandwidth" value="2mb"/>
+  
+  <!-- Add jitter buffer to reduce tearing -->
+  <param name="video-rtp-jitter-msec" value="50"/>
+</profile>
+```
+
+**Why 50ms:**
+- Balances latency vs. smoothness
+- Reduces visual tearing on screen share
+- Acceptable delay for screen content (not real-time video)
+
+### 4. Limit Screen Share Bitrate to 2mb
+
+**Problem:** Higher bitrate wastes bandwidth without quality improvement.
+
+**Solution:** Cap screen share at 2mb (sufficient for 1080p@15fps).
+
+```typescript
+// ❌ WRONG - Too high
+const screenConstraints = {
+  video: {
+    width: { ideal: 1920 },
+    height: { ideal: 1080 },
+    frameRate: { ideal: 15 }
+    // No bitrate limit - can go to 5mb+
+  }
+};
+
+// ✅ CORRECT - Capped at 2mb
+const screenStream = await navigator.mediaDevices.getDisplayMedia({
+  video: {
+    width: { ideal: 1920 },
+    height: { ideal: 1080 },
+    frameRate: { ideal: 15 }
+  }
+});
+
+// Apply bitrate constraint via sender
+const sender = pc.getSenders().find(s => s.track?.kind === 'video');
+if (sender) {
+  const params = sender.getParameters();
+  if (!params.encodings) params.encodings = [{}];
+  params.encodings[0].maxBitrate = 2000000;  // 2mb
+  await sender.setParameters(params);
+}
+```
+
+**Why 2mb is enough:**
+- 1080p@15fps requires ~1.5-2mb for good quality
+- Text remains readable
+- Lower bandwidth usage
+- Faster for participants with slow connections
+
+### 5. Prevent Multiple Simultaneous Screen Shares (Backend)
+
+**Problem:** Multiple users sharing screen simultaneously causes confusion.
+
+**Solution:** Backend enforces single screen share (like Zoom).
+
+```typescript
+// backend/src/sip/handlers/invite.ts
+
+interface ScreenShareState {
+  roomId: string;
+  participantId: string;
+  startedAt: Date;
+}
+
+const activeScreenShares = new Map<string, ScreenShareState>();
+
+async function handleScreenShareInvite(req: any, res: any, roomId: string) {
+  const participantId = req.get('X-Participant-ID');
+  
+  // Check if someone is already sharing
+  const existingShare = activeScreenShares.get(roomId);
+  
+  if (existingShare && existingShare.participantId !== participantId) {
+    // Someone else is already sharing
+    return res.send(409, {
+      error: 'Screen share in progress',
+      message: 'Another participant is currently sharing their screen',
+      activeSharer: existingShare.participantId
+    });
+  }
+  
+  // Allow this screen share
+  activeScreenShares.set(roomId, {
+    roomId,
+    participantId,
+    startedAt: new Date()
+  });
+  
+  // Route to screen conference
+  await routeToConference(req, res, {
+    roomId,
+    conferenceType: 'screen',
+    profile: 'video-screen'
+  });
+}
+
+// Cleanup when screen share ends
+async function handleScreenShareBye(roomId: string, participantId: string) {
+  const existingShare = activeScreenShares.get(roomId);
+  
+  if (existingShare?.participantId === participantId) {
+    activeScreenShares.delete(roomId);
+  }
+}
+```
+
+**Benefits:**
+- ✅ Prevents confusion from multiple screens
+- ✅ Clear UX (one screen at a time)
+- ✅ Follows Zoom/Teams pattern
+- ✅ Reduces bandwidth usage
+
+### 6. Handle Concurrent Screen Share Attempts (Frontend)
+
+**Problem:** Two users click "Share Screen" at the same time.
+
+**Solution:** UI shows clear feedback and chooses newest share.
+
+```typescript
+// web/src/pages/Meeting.tsx
+
+const [screenShareState, setScreenShareState] = useState<{
+  isSharing: boolean;
+  activeSharer: string | null;
+  sharerName: string | null;
+}>({
+  isSharing: false,
+  activeSharer: null,
+  sharerName: null
+});
+
+const toggleScreenShare = async () => {
+  if (screenShareState.isSharing) {
+    // Stop my screen share
+    await vertoService.stopScreenShare();
+    setScreenShareState({ isSharing: false, activeSharer: null, sharerName: null });
+  } else {
+    try {
+      const screenStream = await navigator.mediaDevices.getDisplayMedia({ 
+        video: true 
+      });
+      
+      // Attempt to start screen share
+      const result = await vertoService.startScreenShare(meetingId, screenStream);
+      
+      if (result.success) {
+        setScreenShareState({ 
+          isSharing: true, 
+          activeSharer: participantId,
+          sharerName: displayName 
+        });
+      } else if (result.error === 'SCREEN_SHARE_IN_PROGRESS') {
+        // Someone else is already sharing
+        showNotification({
+          type: 'warning',
+          message: `${result.activeSharerName} is currently sharing their screen`,
+          action: 'Take over',
+          onAction: async () => {
+            // Force take over (newest wins)
+            await vertoService.forceStartScreenShare(meetingId, screenStream);
+            setScreenShareState({ 
+              isSharing: true, 
+              activeSharer: participantId,
+              sharerName: displayName 
+            });
+          }
+        });
+        
+        // Stop the stream we just created
+        screenStream.getTracks().forEach(track => track.stop());
+      }
+    } catch (err) {
+      console.error('Screen share error:', err);
+    }
+  }
+};
+
+// Listen for screen share events from other participants
+useEffect(() => {
+  const handleScreenShareStarted = (data: { participantId: string; displayName: string }) => {
+    if (data.participantId !== participantId) {
+      // Someone else started sharing
+      setScreenShareState({
+        isSharing: false,
+        activeSharer: data.participantId,
+        sharerName: data.displayName
+      });
+      
+      // If I was sharing, stop my share
+      if (screenShareState.isSharing) {
+        vertoService.stopScreenShare();
+        showNotification({
+          type: 'info',
+          message: `${data.displayName} started sharing their screen`
+        });
+      }
+    }
+  };
+  
+  const handleScreenShareStopped = (data: { participantId: string }) => {
+    if (data.participantId === screenShareState.activeSharer) {
+      setScreenShareState({
+        isSharing: false,
+        activeSharer: null,
+        sharerName: null
+      });
+    }
+  };
+  
+  vertoService.on('screen-share-started', handleScreenShareStarted);
+  vertoService.on('screen-share-stopped', handleScreenShareStopped);
+  
+  return () => {
+    vertoService.off('screen-share-started', handleScreenShareStarted);
+    vertoService.off('screen-share-stopped', handleScreenShareStopped);
+  };
+}, [screenShareState, participantId]);
+```
+
+**UI Feedback:**
+```typescript
+// Show who is currently sharing
+{screenShareState.activeSharer && !screenShareState.isSharing && (
+  <div className="bg-blue-100 border border-blue-400 text-blue-700 px-4 py-2 rounded">
+    📺 {screenShareState.sharerName} is sharing their screen
+  </div>
+)}
+
+// Screen share button state
+<button
+  onClick={toggleScreenShare}
+  disabled={screenShareState.activeSharer && !screenShareState.isSharing}
+  className={`p-3 rounded-full ${
+    screenShareState.isSharing 
+      ? 'bg-green-600' 
+      : screenShareState.activeSharer 
+        ? 'bg-gray-400 cursor-not-allowed'
+        : 'bg-gray-600'
+  } text-white`}
+  title={
+    screenShareState.isSharing 
+      ? 'Stop sharing' 
+      : screenShareState.activeSharer 
+        ? `${screenShareState.sharerName} is sharing`
+        : 'Share screen'
+  }
+>
+  <Monitor size={20} />
+</button>
+```
+
+**Conflict Resolution Strategy:**
+- If two users start sharing within same second → newest wins
+- Backend timestamps each share attempt
+- Frontend shows clear notification
+- Option to "take over" (optional, can be disabled)
+
+---
+
+## 📊 Production Readiness Summary
+
+With these 6 final polish items, your multi-track implementation is:
+
+| Aspect | Status | Notes |
+|--------|--------|-------|
+| **Track Identification** | ✅ Production-ready | MID-based, browser-safe |
+| **Screen Share Quality** | ✅ Optimized | 2mb cap, jitter buffer |
+| **Concurrency Control** | ✅ Handled | Single share enforcement |
+| **Browser Compatibility** | ✅ Cross-browser | Safari/Firefox safe |
+| **UX Clarity** | ✅ Clear | Visual feedback, conflict resolution |
+| **Bandwidth Efficiency** | ✅ Optimized | Capped bitrates, smart constraints |
+
+---
+
 **See Also:** `ADR-001-MULTI-TRACK.md` for the formal architecture decision record.
