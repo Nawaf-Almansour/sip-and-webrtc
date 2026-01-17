@@ -354,31 +354,16 @@ export default function Meeting() {
 
   const toggleScreenShare = async () => {
     if (isScreenSharing) {
-      // Stop screen sharing and restore camera
+      // Stop screen sharing (camera stays active)
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
-        const videoTrack = stream.getVideoTracks()[0];
-        
-        if (localStreamRef.current) {
-          const oldVideoTrack = localStreamRef.current.getVideoTracks()[0];
-          if (oldVideoTrack) {
-            oldVideoTrack.stop();
-            localStreamRef.current.removeTrack(oldVideoTrack);
-          }
-          localStreamRef.current.addTrack(videoTrack);
-        }
-        
-        // Replace track in all peer connections
-        await mediaService.replaceVideoTrack(videoTrack);
-        
-        setLocalStream(localStreamRef.current);
+        await mediaService.setScreenTrack(null);
         setIsScreenSharing(false);
-        console.log('[Meeting] Restored camera view');
+        console.log('[Meeting] Screen sharing stopped, camera still active');
       } catch (err) {
-        console.error('Failed to restore camera:', err);
+        console.error('Failed to stop screen share:', err);
       }
     } else {
-      // Start screen sharing
+      // Start screen sharing (camera stays active)
       try {
         const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
         const screenTrack = screenStream.getVideoTracks()[0];
@@ -386,26 +371,23 @@ export default function Meeting() {
         // Handle when user stops sharing via browser UI
         screenTrack.onended = () => {
           console.log('[Meeting] Screen share ended by user');
-          toggleScreenShare();
+          mediaService.setScreenTrack(null);
+          setIsScreenSharing(false);
         };
 
-        if (localStreamRef.current) {
-          const oldVideoTrack = localStreamRef.current.getVideoTracks()[0];
-          if (oldVideoTrack) {
-            oldVideoTrack.stop();
-            localStreamRef.current.removeTrack(oldVideoTrack);
-          }
-          localStreamRef.current.addTrack(screenTrack);
-        }
-        
-        // Replace track in all peer connections
-        await mediaService.replaceVideoTrack(screenTrack);
-        
-        setLocalStream(localStreamRef.current);
+        await mediaService.setScreenTrack(screenTrack);
         setIsScreenSharing(true);
-        console.log('[Meeting] Screen sharing started');
+        console.log('[Meeting] Screen sharing started, camera still active');
       } catch (err) {
-        console.error('Failed to share screen:', err);
+        if (err instanceof Error) {
+          if (err.name === 'NotAllowedError') {
+            console.log('[Meeting] User denied screen share permission');
+          } else if (err.name === 'NotFoundError') {
+            console.log('[Meeting] No screen share source available');
+          } else {
+            console.error('[Meeting] Failed to share screen:', err);
+          }
+        }
       }
     }
   };
