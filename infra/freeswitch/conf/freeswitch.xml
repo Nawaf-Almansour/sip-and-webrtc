@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<document type="freeswitch/xml">
+  <X-PRE-PROCESS cmd="include" data="vars.xml"/>
+  
+  <section name="configuration" description="Configuration">
+    <X-PRE-PROCESS cmd="include" data="autoload_configs/*.xml"/>
+  </section>
+  
+  <section name="dialplan" description="Dialplan">
+    <X-PRE-PROCESS cmd="include" data="dialplan/*.xml"/>
+  </section>
+  
+  <section name="directory" description="User Directory">
+    <domain name="$${domain}">
+      <params>
+        <param name="dial-string" value="{^^:sip_invite_domain=${dialed_domain}:presence_id=${dialed_user}@${dialed_domain}}${sofia_contact(*/${dialed_user}@${dialed_domain})},${verto_contact(${dialed_user}@${dialed_domain})}"/>
+      </params>
+      <groups>
+        <group name="default">
+          <users>
+            <!-- Dynamic users will be created via ESL -->
+          </users>
+        </group>
+      </groups>
+    </domain>
+  </section>
+  
+  <section name="sofia" description="SIP Profiles">
+    <X-PRE-PROCESS cmd="include" data="sip_profiles/*.xml"/>
+  </section>
+</document>

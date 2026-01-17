@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<include>
+  <!-- FreeSWITCH Variables -->
+  <X-PRE-PROCESS cmd="set" data="domain=localhost"/>
+  <X-PRE-PROCESS cmd="set" data="domain_name=$${domain}"/>
+  <X-PRE-PROCESS cmd="set" data="hold_music=local_stream://moh"/>
+  <X-PRE-PROCESS cmd="set" data="use_profile=internal"/>
+  <X-PRE-PROCESS cmd="set" data="rtp_sdes_suites=AEAD_AES_256_GCM_8|AEAD_AES_128_GCM_8|AES_CM_256_HMAC_SHA1_80|AES_CM_192_HMAC_SHA1_80|AES_CM_128_HMAC_SHA1_80|AES_CM_256_HMAC_SHA1_32|AES_CM_192_HMAC_SHA1_32|AES_CM_128_HMAC_SHA1_32|AES_CM_128_NULL_AUTH"/>
+  
+  <!-- WebRTC Settings -->
+  <X-PRE-PROCESS cmd="set" data="external_rtp_ip=stun:stun.l.google.com:19302"/>
+  <X-PRE-PROCESS cmd="set" data="external_sip_ip=stun:stun.l.google.com:19302"/>
+  
+  <!-- Codec Settings -->
+  <X-PRE-PROCESS cmd="set" data="global_codec_prefs=OPUS,VP8,PCMU,PCMA"/>
+  <X-PRE-PROCESS cmd="set" data="outbound_codec_prefs=OPUS,VP8,PCMU,PCMA"/>
+  
+  <!-- TLS/WSS Settings -->
+  <X-PRE-PROCESS cmd="set" data="internal_ssl_enable=true"/>
+  <X-PRE-PROCESS cmd="set" data="internal_ssl_dir=/etc/freeswitch/certs"/>
+</include>

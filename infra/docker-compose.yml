@@ -1,0 +1,134 @@
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: sip-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: sip_meetings
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7.2-alpine
+    container_name: sip-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # freeswitch:
+  #   image: signalwire/freeswitch:1.10.12
+  #   container_name: sip-freeswitch
+  #   ports:
+  #     - "5060:5060/udp"
+  #     - "5060:5060/tcp"
+  #     - "5061:5061/tcp"
+  #     - "7443:7443/tcp"
+  #     - "8021:8021/tcp"
+  #     - "16384-16484:16384-16484/udp"
+  #   volumes:
+  #     - ./freeswitch/conf:/etc/freeswitch
+  #     - ./certs:/etc/freeswitch/certs
+  #   environment:
+  #     - FREESWITCH_DOMAIN=localhost
+  #   healthcheck:
+  #     test: ["CMD", "fs_cli", "-x", "status"]
+  #     interval: 30s
+  #     timeout: 10s
+  #     retries: 3
+  #   depends_on:
+  #     - redis
+
+  # drachtio:
+  #   image: drachtio/drachtio-server:0.8.25
+  #   container_name: sip-drachtio
+  #   ports:
+  #     - "9022:9022/tcp"
+  #     - "5062:5062/udp"
+  #     - "5062:5062/tcp"
+  #     - "8443:8443/tcp"
+  #   volumes:
+  #     - ./drachtio/config:/etc/drachtio
+  #     - ./certs:/etc/drachtio/certs
+  #   command: drachtio --contact "sip:*;transport=udp" --contact "sip:*;transport=tcp" --contact "sips:*:8443;transport=wss" --loglevel info
+  #   healthcheck:
+  #     test: ["CMD", "nc", "-z", "localhost", "9022"]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 5
+  #   depends_on:
+  #     - freeswitch
+
+  coturn:
+    image: coturn/coturn:4.6.2-alpine
+    container_name: sip-coturn
+    ports:
+      - "3478:3478/udp"
+      - "3478:3478/tcp"
+      - "5349:5349/tcp"
+      - "49152-49252:49152-49252/udp"
+    volumes:
+      - ./coturn/turnserver.conf:/etc/coturn/turnserver.conf
+      - ./certs:/etc/coturn/certs
+    command: -c /etc/coturn/turnserver.conf
+    healthcheck:
+      test: ["CMD", "turnutils_stunclient", "localhost"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  backend:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    container_name: sip-backend
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=development
+      - PORT=3000
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/sip_meetings?schema=public
+      - REDIS_URL=redis://redis:6379
+      - DRACHTIO_HOST=drachtio
+      - DRACHTIO_PORT=9022
+      - DRACHTIO_SECRET=cymru
+      - FREESWITCH_HOST=freeswitch
+      - FREESWITCH_ESL_PORT=8021
+      - FREESWITCH_ESL_PASSWORD=ClueCon
+      - SIP_DOMAIN=localhost
+      - WSS_URL=wss://localhost:8443
+      - TURN_URL=turn:localhost:3478
+      - TURN_USERNAME=turnuser
+      - TURN_PASSWORD=turnpassword
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  default:
+    name: sip-network

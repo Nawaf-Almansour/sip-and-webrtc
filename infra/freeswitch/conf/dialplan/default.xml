@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<include>
+  <context name="default">
+    <!-- 1:1 Call Bridge -->
+    <extension name="call-bridge">
+      <condition field="destination_number" expression="^call-([a-f0-9-]+)$">
+        <action application="set" data="call_id=$1"/>
+        <action application="log" data="INFO Processing 1:1 call: ${call_id}"/>
+        <action application="answer"/>
+        <action application="bridge" data="user/${call_id}@${domain_name}"/>
+      </condition>
+    </extension>
+    
+    <!-- Conference Room -->
+    <extension name="conference-room">
+      <condition field="destination_number" expression="^room-([a-f0-9-]+)$">
+        <action application="set" data="meeting_id=$1"/>
+        <action application="log" data="INFO Joining conference: ${meeting_id}"/>
+        <action application="answer"/>
+        <action application="conference" data="${meeting_id}@video-mcu-stereo"/>
+      </condition>
+    </extension>
+    
+    <!-- Echo Test -->
+    <extension name="echo">
+      <condition field="destination_number" expression="^9196$">
+        <action application="answer"/>
+        <action application="echo"/>
+      </condition>
+    </extension>
+  </context>
+</include>

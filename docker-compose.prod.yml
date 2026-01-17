@@ -1,0 +1,51 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: sip_meetings
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backend/src/store/schema.sql:/docker-entrypoint-initdb.d/schema.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/sip_meetings
+      SIP_DOMAIN: sip.example.com
+      SIP_WSS_URL: wss://sip.example.com:7443
+      STUN_URL: stun:stun.l.google.com:19302
+      TURN_URL: turn:turn.example.com:3478
+      TURN_USERNAME: turnuser
+      TURN_PASSWORD: turnpassword
+      TOKEN_SECRET: your-secret-key-change-in-production
+      TOKEN_TTL_SECONDS: 3600
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  postgres_data:

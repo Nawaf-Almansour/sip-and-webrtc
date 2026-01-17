@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<configuration name="modules.conf" description="Modules Configuration">
+  <modules>
+    <!-- Loggers -->
+    <load module="mod_console"/>
+    <load module="mod_logfile"/>
+    
+    <!-- Event Handlers -->
+    <load module="mod_event_socket"/>
+    
+    <!-- Applications -->
+    <load module="mod_commands"/>
+    <load module="mod_dptools"/>
+    <load module="mod_dialplan_xml"/>
+    <load module="mod_conference"/>
+    
+    <!-- Codecs -->
+    <load module="mod_opus"/>
+    <load module="mod_amr"/>
+    
+    <!-- Endpoints -->
+    <load module="mod_sofia"/>
+    
+    <!-- File Formats -->
+    <load module="mod_sndfile"/>
+    <load module="mod_native_file"/>
+    <load module="mod_tone_stream"/>
+    <load module="mod_local_stream"/>
+  </modules>
+</configuration>

@@ -1,0 +1,718 @@
+import { useEffect, useState, useCallback, useRef } from 'react';
+import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
+import VideoGrid from '../components/VideoGrid';
+import { mediaService, ConnectionMode } from '../services/mediaService';
+
+interface JoinData {
+  sipUri: string;
+  joinToken: string;
+  wssUrl: string;
+  participantId: string;
+  turnConfig: {
+    urls: string[];
+    username: string;
+    credential: string;
+  };
+}
+
+interface Participant {
+  id: string;
+  shortId?: string;
+  displayName: string;
+  role: string;
+  isMuted?: boolean;
+  isVideoOff?: boolean;
+  joinedAt: string;
+  stream?: MediaStream;
+  isLocal?: boolean;
+}
+
+export default function Meeting() {
+  const { meetingId } = useParams<{ meetingId: string }>();
+  const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
+  const displayName = searchParams.get('name') || 'Guest';
+  const role = searchParams.get('role') || 'participant';
+  const connectionMode = (searchParams.get('mode') as ConnectionMode) || 'webrtc';
+
+  const [joinData, setJoinData] = useState<JoinData | null>(null);
+  const [connected, setConnected] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [participants, setParticipants] = useState<Participant[]>([]);
+  const [remoteStreams, setRemoteStreams] = useState<Map<string, MediaStream>>(new Map());
+  const [showParticipants, setShowParticipants] = useState(true);
+  const [localStream, setLocalStream] = useState<MediaStream | null>(null);
+  const [isMuted, setIsMuted] = useState(false);
+  const [isVideoOff, setIsVideoOff] = useState(false);
+  const [isScreenSharing, setIsScreenSharing] = useState(false);
+  const [showShareModal, setShowShareModal] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [notifications, setNotifications] = useState<{id: string; message: string; type: 'join' | 'leave'}[]>([]);
+  const [showHostControls, setShowHostControls] = useState(false);
+  const [showChat, setShowChat] = useState(false);
+  const [chatMessages, setChatMessages] = useState<{id: string; from: string; displayName: string; message: string; timestamp: string}[]>([]);
+  const [chatInput, setChatInput] = useState('');
+  const [waitingParticipants, setWaitingParticipants] = useState<{id: string; displayName: string; shortId: string}[]>([]);
+  const localStreamRef = useRef<MediaStream | null>(null);
+  const hasJoinedRef = useRef(false);
+  const webrtcConnectedRef = useRef(false);
+  const isHost = role === 'host';
+
+  const addNotification = (message: string, type: 'join' | 'leave') => {
+    const id = Date.now().toString();
+    setNotifications(prev => [...prev, { id, message, type }]);
+    setTimeout(() => {
+      setNotifications(prev => prev.filter(n => n.id !== id));
+    }, 3000);
+  };
+
+  const shareUrl = typeof window !== 'undefined' 
+    ? `${window.location.origin}/join/${meetingId}` 
+    : '';
+
+  const copyShareLink = async () => {
+    try {
+      await navigator.clipboard.writeText(shareUrl);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy:', err);
+    }
+  };
+
+  const startLocalMedia = useCallback(async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: true,
+        audio: true,
+      });
+      localStreamRef.current = stream;
+      setLocalStream(stream);
+      return stream;
+    } catch (err) {
+      console.error('Failed to get local media:', err);
+      setError('Failed to access camera/microphone. Please allow permissions.');
+      return null;
+    }
+  }, []);
+
+  const fetchParticipants = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/meetings/${meetingId}/participants`);
+      if (res.ok) {
+        const data = await res.json();
+        setParticipants(prev => {
+          return data.participants.map((p: Participant) => {
+            const existing = prev.find(ep => ep.id === p.id);
+            return {
+              ...p,
+              stream: existing?.stream,
+              isLocal: p.id === joinData?.participantId,
+            };
+          });
+        });
+      }
+    } catch (err) {
+      console.error('Failed to fetch participants:', err);
+    }
+  }, [meetingId, joinData?.participantId]);
+
+  useEffect(() => {
+    if (!searchParams.get('name')) {
+      navigate(`/?redirect=meeting&id=${meetingId}`);
+      return;
+    }
+
+    if (hasJoinedRef.current) {
+      return;
+    }
+
+    const joinMeeting = async () => {
+      try {
+        hasJoinedRef.current = true;
+        await startLocalMedia();
+
+        const res = await fetch(`/api/meetings/${meetingId}/join`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ displayName, role }),
+        });
+
+        if (!res.ok) {
+          hasJoinedRef.current = false;
+          throw new Error('Failed to join meeting');
+        }
+
+        const data = await res.json();
+        setJoinData(data);
+        setConnected(true);
+
+        // Connect using mediaService (supports both WebRTC P2P and SIP)
+        if (localStreamRef.current && !webrtcConnectedRef.current) {
+          webrtcConnectedRef.current = true;
+          
+          console.log(`[Meeting] Connecting via ${connectionMode} mode`);
+          
+          await mediaService.connect({
+            mode: connectionMode,
+            meetingId: meetingId!,
+            participantId: data.participantId,
+            displayName,
+            localStream: localStreamRef.current,
+            vertoConfig: connectionMode === 'verto' ? {
+              wssUrl: data.wssUrl || 'ws://localhost:8081',
+              login: '1000@172.17.0.3',
+              password: 'CGxv2aoKZS7b',
+              callerIdName: displayName,
+              callerIdNumber: data.participantId,
+              turnConfig: data.turnConfig,
+            } : undefined,
+            callbacks: {
+              onRemoteStream: (participantId: string, stream: MediaStream) => {
+                console.log('Received remote stream from:', participantId);
+                setRemoteStreams(prev => new Map(prev).set(participantId, stream));
+              },
+              onParticipantLeft: (participantId: string) => {
+                console.log('Participant left:', participantId);
+                setRemoteStreams(prev => {
+                  const newMap = new Map(prev);
+                  newMap.delete(participantId);
+                  return newMap;
+                });
+                addNotification('A participant left the meeting', 'leave');
+              },
+              onParticipantJoined: (participantId: string, name: string) => {
+                console.log('Participant joined:', participantId, name);
+                addNotification(`${name} joined the meeting`, 'join');
+              },
+              onChatMessage: (from: string, senderName: string, message: string, timestamp: number) => {
+                setChatMessages(prev => [...prev, {
+                  id: `${from}-${timestamp}`,
+                  from,
+                  displayName: senderName,
+                  message,
+                  timestamp: String(timestamp),
+                }]);
+              },
+              onError: (error: Error) => {
+                console.error('Media service error:', error);
+                setError(error.message);
+              },
+            },
+          });
+        }
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Unknown error');
+      }
+    };
+
+    joinMeeting();
+
+    return () => {
+      if (localStreamRef.current) {
+        localStreamRef.current.getTracks().forEach(track => track.stop());
+      }
+      mediaService.disconnect();
+    };
+  }, [meetingId, displayName, role, navigate, searchParams, startLocalMedia, connectionMode]);
+
+  useEffect(() => {
+    if (!connected || !joinData) return;
+    fetchParticipants();
+  }, [connected, joinData, fetchParticipants]);
+
+  useEffect(() => {
+    if (!connected) return;
+
+    const interval = setInterval(fetchParticipants, 3000);
+    return () => clearInterval(interval);
+  }, [connected, fetchParticipants]);
+
+  // Fetch waiting room participants for host
+  const fetchWaitingRoom = useCallback(async () => {
+    if (!isHost || !meetingId) return;
+    try {
+      const res = await fetch(`/api/meetings/${meetingId}/waiting-room`);
+      if (res.ok) {
+        const data = await res.json();
+        setWaitingParticipants(data.waitingParticipants);
+      }
+    } catch (err) {
+      console.error('Failed to fetch waiting room:', err);
+    }
+  }, [isHost, meetingId]);
+
+  useEffect(() => {
+    if (!connected || !isHost) return;
+    fetchWaitingRoom();
+    const interval = setInterval(fetchWaitingRoom, 3000);
+    return () => clearInterval(interval);
+  }, [connected, isHost, fetchWaitingRoom]);
+
+  const handleLeave = async () => {
+    if (localStreamRef.current) {
+      localStreamRef.current.getTracks().forEach(track => track.stop());
+    }
+    if (joinData?.participantId) {
+      await fetch(`/api/meetings/${meetingId}/leave`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ participantId: joinData.participantId }),
+      });
+    }
+    window.location.href = '/';
+  };
+
+  const updateParticipantStatus = async (newIsMuted: boolean, newIsVideoOff: boolean) => {
+    if (joinData?.participantId) {
+      try {
+        await fetch(`/api/meetings/${meetingId}/participants/${joinData.participantId}/status`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ isMuted: newIsMuted, isVideoOff: newIsVideoOff }),
+        });
+      } catch (err) {
+        console.error('Failed to update status:', err);
+      }
+    }
+  };
+
+  const toggleMute = () => {
+    if (localStreamRef.current) {
+      const newMuted = !isMuted;
+      localStreamRef.current.getAudioTracks().forEach(track => {
+        track.enabled = !newMuted;
+      });
+      setIsMuted(newMuted);
+      updateParticipantStatus(newMuted, isVideoOff);
+    }
+  };
+
+  const toggleVideo = () => {
+    if (localStreamRef.current) {
+      const newVideoOff = !isVideoOff;
+      localStreamRef.current.getVideoTracks().forEach(track => {
+        track.enabled = !newVideoOff;
+      });
+      setIsVideoOff(newVideoOff);
+      updateParticipantStatus(isMuted, newVideoOff);
+    }
+  };
+
+  const toggleScreenShare = async () => {
+    if (isScreenSharing) {
+      // Stop screen sharing and restore camera
+      if (localStreamRef.current) {
+        localStreamRef.current.getVideoTracks().forEach(track => track.stop());
+      }
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+        const videoTrack = stream.getVideoTracks()[0];
+        if (localStreamRef.current) {
+          const oldVideoTrack = localStreamRef.current.getVideoTracks()[0];
+          if (oldVideoTrack) {
+            localStreamRef.current.removeTrack(oldVideoTrack);
+          }
+          localStreamRef.current.addTrack(videoTrack);
+        }
+        setLocalStream(localStreamRef.current);
+        setIsScreenSharing(false);
+      } catch (err) {
+        console.error('Failed to restore camera:', err);
+      }
+    } else {
+      // Start screen sharing
+      try {
+        const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+        const screenTrack = screenStream.getVideoTracks()[0];
+        
+        screenTrack.onended = () => {
+          toggleScreenShare();
+        };
+
+        if (localStreamRef.current) {
+          const oldVideoTrack = localStreamRef.current.getVideoTracks()[0];
+          if (oldVideoTrack) {
+            oldVideoTrack.stop();
+            localStreamRef.current.removeTrack(oldVideoTrack);
+          }
+          localStreamRef.current.addTrack(screenTrack);
+        }
+        setLocalStream(localStreamRef.current);
+        setIsScreenSharing(true);
+      } catch (err) {
+        console.error('Failed to share screen:', err);
+      }
+    }
+  };
+
+  if (error) {
+    return (
+      <div className="min-h-screen bg-gray-900 flex items-center justify-center">
+        <div className="text-center">
+          <div className="text-red-500 text-xl mb-4">{error}</div>
+          <button
+            onClick={() => window.location.reload()}
+            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  const videoParticipants = participants.map(p => ({
+    ...p,
+    isLocal: p.id === joinData?.participantId,
+    stream: p.id === joinData?.participantId ? undefined : remoteStreams.get(p.id),
+  }));
+
+  return (
+    <div className="min-h-screen bg-gray-900 flex flex-col">
+      <div className="flex-1 flex">
+        <div className="flex-1 p-4">
+          <VideoGrid participants={videoParticipants} localStream={localStream} remoteStreams={remoteStreams} />
+        </div>
+
+        {showParticipants && (
+          <div className="w-72 bg-gray-800 border-l border-gray-700 p-4 overflow-y-auto">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-white font-semibold">Participants ({participants.length})</h3>
+              <button
+                onClick={() => setShowParticipants(false)}
+                className="text-gray-400 hover:text-white"
+              >
+                ✕
+              </button>
+            </div>
+            <ul className="space-y-2">
+              {participants.map((p) => (
+                <li
+                  key={p.id}
+                  className="flex items-center space-x-3 p-2 rounded-lg bg-gray-700"
+                >
+                  <div className="w-10 h-10 rounded-full bg-blue-600 flex items-center justify-center text-white font-semibold relative">
+                    {p.displayName.charAt(0).toUpperCase()}
+                    {p.shortId && (
+                      <span className="absolute -bottom-1 -right-1 bg-gray-900 text-[10px] px-1 rounded text-gray-300">
+                        #{p.shortId}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-white text-sm truncate">
+                      {p.displayName}
+                      {p.id === joinData?.participantId && (
+                        <span className="text-blue-400 ml-1">(You)</span>
+                      )}
+                    </div>
+                    <div className="text-gray-400 text-xs capitalize">{p.role}</div>
+                  </div>
+                  <div className="flex items-center space-x-1">
+                    <span className={`text-sm ${p.isMuted ? 'text-red-400' : 'text-green-400'}`} title={p.isMuted ? 'Muted' : 'Unmuted'}>
+                      {p.isMuted ? '🔇' : '🎤'}
+                    </span>
+                    <span className={`text-sm ${p.isVideoOff ? 'text-red-400' : 'text-green-400'}`} title={p.isVideoOff ? 'Camera off' : 'Camera on'}>
+                      {p.isVideoOff ? '📷' : '🎥'}
+                    </span>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </div>
+
+      <div className="p-4 bg-gray-800">
+        <div className="text-center text-gray-400 text-sm mb-2">
+          {displayName} | Meeting ID: {meetingId?.slice(0, 8)}... | {connected ? 'Connected' : 'Connecting...'} | {participants.length} participant(s)
+        </div>
+        <div className="flex justify-center items-center space-x-4">
+          <button
+            onClick={toggleMute}
+            className={`p-3 rounded-full ${isMuted ? 'bg-red-600' : 'bg-gray-600'} text-white hover:opacity-80`}
+            title={isMuted ? 'Unmute' : 'Mute'}
+          >
+            {isMuted ? '🔇' : '🎤'}
+          </button>
+          <button
+            onClick={toggleVideo}
+            className={`p-3 rounded-full ${isVideoOff ? 'bg-red-600' : 'bg-gray-600'} text-white hover:opacity-80`}
+            title={isVideoOff ? 'Turn on camera' : 'Turn off camera'}
+          >
+            {isVideoOff ? '📷' : '🎥'}
+          </button>
+          <button
+            onClick={toggleScreenShare}
+            className={`p-3 rounded-full ${isScreenSharing ? 'bg-green-600' : 'bg-gray-600'} text-white hover:opacity-80`}
+            title={isScreenSharing ? 'Stop sharing' : 'Share screen'}
+          >
+            🖥️
+          </button>
+          <button
+            onClick={() => setShowShareModal(true)}
+            className="p-3 rounded-full bg-blue-600 text-white hover:bg-blue-700"
+            title="Share meeting link"
+          >
+            🔗
+          </button>
+          <button
+            onClick={handleLeave}
+            className="p-3 rounded-full bg-red-600 text-white hover:bg-red-700"
+            title="Leave meeting"
+          >
+            📞
+          </button>
+          {!showParticipants && (
+            <button
+              onClick={() => setShowParticipants(true)}
+              className="p-3 rounded-full bg-gray-600 text-white hover:bg-gray-500"
+              title="Show participants"
+            >
+              👥
+            </button>
+          )}
+          {isHost && (
+            <button
+              onClick={() => setShowHostControls(true)}
+              className="p-3 rounded-full bg-purple-600 text-white hover:bg-purple-700"
+              title="Host controls"
+            >
+              ⚙️
+            </button>
+          )}
+          <button
+            onClick={() => setShowChat(!showChat)}
+            className={`p-3 rounded-full ${showChat ? 'bg-blue-600' : 'bg-gray-600'} text-white hover:opacity-80 relative`}
+            title="Chat"
+          >
+            💬
+            {chatMessages.length > 0 && !showChat && (
+              <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs w-5 h-5 rounded-full flex items-center justify-center">
+                {chatMessages.length > 9 ? '9+' : chatMessages.length}
+              </span>
+            )}
+          </button>
+        </div>
+      </div>
+
+      {/* Chat Panel */}
+      {showChat && (
+        <div className="fixed bottom-24 right-4 w-80 h-96 bg-gray-800 rounded-lg shadow-xl flex flex-col z-40">
+          <div className="p-3 border-b border-gray-700 flex justify-between items-center">
+            <h3 className="text-white font-semibold">Chat</h3>
+            <button onClick={() => setShowChat(false)} className="text-gray-400 hover:text-white">✕</button>
+          </div>
+          <div className="flex-1 overflow-y-auto p-3 space-y-2">
+            {chatMessages.map((msg) => (
+              <div key={msg.id} className={`${msg.from === joinData?.participantId ? 'text-right' : ''}`}>
+                <div className={`inline-block max-w-[80%] px-3 py-2 rounded-lg ${
+                  msg.from === joinData?.participantId ? 'bg-blue-600 text-white' : 'bg-gray-700 text-white'
+                }`}>
+                  {msg.from !== joinData?.participantId && (
+                    <div className="text-xs text-gray-300 mb-1">{msg.displayName}</div>
+                  )}
+                  <div className="text-sm">{msg.message}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="p-3 border-t border-gray-700">
+            <div className="flex space-x-2">
+              <input
+                type="text"
+                value={chatInput}
+                onChange={(e) => setChatInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && chatInput.trim()) {
+                    mediaService.sendChatMessage(chatInput.trim());
+                    setChatInput('');
+                  }
+                }}
+                placeholder="Type a message..."
+                className="flex-1 px-3 py-2 bg-gray-700 text-white rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
+              />
+              <button
+                onClick={() => {
+                  if (chatInput.trim()) {
+                    mediaService.sendChatMessage(chatInput.trim());
+                    setChatInput('');
+                  }
+                }}
+                className="px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+              >
+                Send
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Notifications */}
+      <div className="fixed top-4 right-4 z-50 space-y-2">
+        {notifications.map((n) => (
+          <div
+            key={n.id}
+            className={`px-4 py-2 rounded-lg shadow-lg text-white text-sm animate-pulse ${
+              n.type === 'join' ? 'bg-green-600' : 'bg-orange-600'
+            }`}
+          >
+            {n.message}
+          </div>
+        ))}
+      </div>
+
+      {/* Host Controls Modal */}
+      {showHostControls && isHost && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-gray-800 rounded-lg p-6 w-96 shadow-xl">
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-xl font-semibold text-white">Host Controls</h2>
+              <button
+                onClick={() => setShowHostControls(false)}
+                className="text-gray-400 hover:text-white text-xl"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="space-y-3">
+              <button
+                onClick={async () => {
+                  await fetch(`/api/meetings/${meetingId}/mute-all`, { method: 'POST' });
+                  fetchParticipants();
+                  setShowHostControls(false);
+                }}
+                className="w-full py-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700"
+              >
+                🔇 Mute All Participants
+              </button>
+              <button
+                onClick={async () => {
+                  await fetch(`/api/meetings/${meetingId}/end`, { method: 'POST' });
+                  window.location.href = '/';
+                }}
+                className="w-full py-2 bg-red-600 text-white rounded-lg hover:bg-red-700"
+              >
+                🛑 End Meeting for All
+              </button>
+            </div>
+            <div className="mt-4 pt-4 border-t border-gray-700">
+              <h3 className="text-white text-sm font-semibold mb-2">Kick Participant</h3>
+              <div className="space-y-2 max-h-40 overflow-y-auto">
+                {participants.filter(p => p.id !== joinData?.participantId).map((p) => (
+                  <div key={p.id} className="flex items-center justify-between bg-gray-700 p-2 rounded">
+                    <span className="text-white text-sm">{p.displayName}</span>
+                    <button
+                      onClick={async () => {
+                        await fetch(`/api/meetings/${meetingId}/kick`, {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ participantId: p.id }),
+                        });
+                        fetchParticipants();
+                      }}
+                      className="px-2 py-1 bg-red-600 text-white text-xs rounded hover:bg-red-700"
+                    >
+                      Kick
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+            {/* Waiting Room Section */}
+            <div className="mt-4 pt-4 border-t border-gray-700">
+              <h3 className="text-white text-sm font-semibold mb-2">
+                Waiting Room ({waitingParticipants.length})
+              </h3>
+              {waitingParticipants.length === 0 ? (
+                <p className="text-gray-500 text-sm">No one is waiting</p>
+              ) : (
+                <>
+                  <button
+                    onClick={async () => {
+                      await fetch(`/api/meetings/${meetingId}/waiting-room/admit-all`, { method: 'POST' });
+                      fetchWaitingRoom();
+                    }}
+                    className="w-full py-2 mb-2 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm"
+                  >
+                    ✓ Admit All
+                  </button>
+                  <div className="space-y-2 max-h-40 overflow-y-auto">
+                    {waitingParticipants.map((p) => (
+                      <div key={p.id} className="flex items-center justify-between bg-gray-700 p-2 rounded">
+                        <span className="text-white text-sm">{p.displayName}</span>
+                        <div className="flex space-x-1">
+                          <button
+                            onClick={async () => {
+                              await fetch(`/api/meetings/${meetingId}/waiting-room/admit`, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ participantId: p.id }),
+                              });
+                              fetchWaitingRoom();
+                            }}
+                            className="px-2 py-1 bg-green-600 text-white text-xs rounded hover:bg-green-700"
+                          >
+                            Admit
+                          </button>
+                          <button
+                            onClick={async () => {
+                              await fetch(`/api/meetings/${meetingId}/waiting-room/deny`, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ participantId: p.id }),
+                              });
+                              fetchWaitingRoom();
+                            }}
+                            className="px-2 py-1 bg-red-600 text-white text-xs rounded hover:bg-red-700"
+                          >
+                            Deny
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showShareModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-gray-800 rounded-lg p-6 w-96 shadow-xl">
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-xl font-semibold text-white">Share Meeting</h2>
+              <button
+                onClick={() => setShowShareModal(false)}
+                className="text-gray-400 hover:text-white text-xl"
+              >
+                ✕
+              </button>
+            </div>
+            <p className="text-gray-400 mb-4">Share this link with others to invite them to the meeting:</p>
+            <div className="flex items-center space-x-2 mb-4">
+              <input
+                type="text"
+                value={shareUrl}
+                readOnly
+                className="flex-1 px-4 py-2 bg-gray-700 text-white rounded-lg border border-gray-600 text-sm"
+              />
+              <button
+                onClick={copyShareLink}
+                className={`px-4 py-2 rounded-lg text-white ${copied ? 'bg-green-600' : 'bg-blue-600 hover:bg-blue-700'}`}
+              >
+                {copied ? '✓ Copied' : 'Copy'}
+              </button>
+            </div>
+            <div className="text-center">
+              <p className="text-gray-500 text-sm">Meeting ID: {meetingId}</p>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

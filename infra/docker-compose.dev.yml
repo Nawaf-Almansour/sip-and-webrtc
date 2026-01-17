@@ -1,0 +1,67 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: sip-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: sip_meetings
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  freeswitch:
+    image: safarov/freeswitch:latest
+    container_name: sip-freeswitch
+    ports:
+      - "5060:5060/udp"
+      - "5060:5060/tcp"
+      - "5066:5066/tcp"
+      - "7443:7443/tcp"
+      - "8021:8021/tcp"
+      - "16384-16484:16384-16484/udp"
+    volumes:
+      - ./freeswitch/conf/vars.xml:/etc/freeswitch/vars.xml
+      - ./freeswitch/conf/sip_profiles/internal.xml:/etc/freeswitch/sip_profiles/internal.xml
+      - ./freeswitch/conf/dialplan/default.xml:/etc/freeswitch/dialplan/default.xml
+      - ./freeswitch/conf/autoload_configs/conference.conf.xml:/etc/freeswitch/autoload_configs/conference.conf.xml
+      - ./freeswitch/certs:/etc/freeswitch/tls
+    environment:
+      - OTEL_EXPORTER_OTLP_ENDPOINT=
+    depends_on:
+      - postgres
+
+  drachtio:
+    image: drachtio/drachtio-server:latest
+    container_name: sip-drachtio
+    ports:
+      - "9022:9022"
+    command: drachtio --contact "sip:*:5060;transport=udp,tcp" --loglevel debug
+    depends_on:
+      - freeswitch
+
+  coturn:
+    image: coturn/coturn:latest
+    container_name: sip-coturn
+    ports:
+      - "3478:3478/udp"
+      - "3478:3478/tcp"
+      - "5349:5349/tcp"
+      - "49152-65535:49152-65535/udp"
+    command: >
+      -n
+      --log-file=stdout
+      --min-port=49152
+      --max-port=65535
+      --realm=localhost
+      --user=turnuser:turnpassword
+      --lt-cred-mech
+      --fingerprint
+      --no-tlsv1
+      --no-tlsv1_1
+
+volumes:
+  postgres_data:

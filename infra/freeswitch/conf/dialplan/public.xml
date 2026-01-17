@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<include>
+  <context name="public">
+    <!-- Route all calls to default context -->
+    <extension name="public_extensions">
+      <condition field="destination_number" expression="^(.*)$">
+        <action application="transfer" data="$1 XML default"/>
+      </condition>
+    </extension>
+  </context>
+</include>

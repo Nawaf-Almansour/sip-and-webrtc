@@ -1,0 +1,55 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum CallStatus {
+  PENDING
+  ACTIVE
+  ENDED
+}
+
+enum MeetingStatus {
+  ACTIVE
+  ENDED
+}
+
+model Call {
+  id           String        @id @default(uuid())
+  status       CallStatus    @default(PENDING)
+  createdAt    DateTime      @default(now()) @map("created_at")
+  endedAt      DateTime?     @map("ended_at")
+  participants Participant[]
+
+  @@map("calls")
+}
+
+model Meeting {
+  id              String        @id @default(uuid())
+  status          MeetingStatus @default(ACTIVE)
+  maxParticipants Int           @default(10) @map("max_participants")
+  createdAt       DateTime      @default(now()) @map("created_at")
+  endedAt         DateTime?     @map("ended_at")
+  participants    Participant[]
+
+  @@map("meetings")
+}
+
+model Participant {
+  id          String    @id @default(uuid())
+  displayName String?   @map("display_name")
+  role        String    @default("participant")
+  callId      String?   @map("call_id")
+  meetingId   String?   @map("meeting_id")
+  joinedAt    DateTime  @default(now()) @map("joined_at")
+  leftAt      DateTime? @map("left_at")
+
+  call    Call?    @relation(fields: [callId], references: [id], onDelete: Cascade)
+  meeting Meeting? @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+
+  @@map("participants")
+}
