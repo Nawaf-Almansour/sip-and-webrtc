@@ -95,7 +95,7 @@ services:
       FREESWITCH_ESL_PORT: 8021
       FREESWITCH_ESL_PASSWORD: ClueCon
       SIP_DOMAIN: 192.168.100.218
-      WSS_URL: wss://192.168.100.218/ws
+      WSS_URL: wss://192.168.100.218:8443
       STUN_URL: stun:stun.l.google.com:19302
       TURN_URL: turn:localhost:3478
       TURN_USERNAME: turnuser
