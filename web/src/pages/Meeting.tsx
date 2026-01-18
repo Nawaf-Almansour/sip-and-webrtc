@@ -46,6 +46,8 @@ export default function Meeting() {
   const [remoteStreams, setRemoteStreams] = useState<Map<string, MediaStream>>(new Map());
   const [showParticipants, setShowParticipants] = useState(true);
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
+  const [localCameraStream, setLocalCameraStream] = useState<MediaStream | null>(null);
+  const [localScreenStream, setLocalScreenStream] = useState<MediaStream | null>(null);
   const [isMuted, setIsMuted] = useState(false);
   const [isVideoOff, setIsVideoOff] = useState(false);
   const [isScreenSharing, setIsScreenSharing] = useState(false);
@@ -94,6 +96,7 @@ export default function Meeting() {
       });
       localStreamRef.current = stream;
       setLocalStream(stream);
+      setLocalCameraStream(stream);
       return stream;
     } catch (err: any) {
       console.error('Failed to get local media:', err);
@@ -357,6 +360,7 @@ export default function Meeting() {
       // Stop screen sharing (camera stays active)
       try {
         await mediaService.setScreenTrack(null);
+        setLocalScreenStream(null);
         setIsScreenSharing(false);
         console.log('[Meeting] Screen sharing stopped, camera still active');
       } catch (err) {
@@ -372,10 +376,12 @@ export default function Meeting() {
         screenTrack.onended = () => {
           console.log('[Meeting] Screen share ended by user');
           mediaService.setScreenTrack(null);
+          setLocalScreenStream(null);
           setIsScreenSharing(false);
         };
 
         await mediaService.setScreenTrack(screenTrack);
+        setLocalScreenStream(screenStream);
         setIsScreenSharing(true);
         console.log('[Meeting] Screen sharing started, camera still active');
       } catch (err) {
@@ -427,7 +433,9 @@ export default function Meeting() {
         <div className="flex-1 p-4">
           <VideoGrid 
             participants={videoParticipants} 
-            localStream={localStream} 
+            localStream={localStream}
+            localCameraStream={localCameraStream}
+            localScreenStream={localScreenStream}
             remoteStreams={remoteStreams}
             layout={layout}
             activeSpeakerId={activeSpeakerId}
