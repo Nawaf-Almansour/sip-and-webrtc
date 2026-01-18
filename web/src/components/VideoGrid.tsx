@@ -165,9 +165,12 @@ export default function VideoGrid({
               key={activeSpeaker.id}
               participant={activeSpeaker}
               stream={activeSpeaker.isLocal ? localStream : (activeSpeaker.stream || remoteStreams?.get(activeSpeaker.id))}
+              cameraStream={activeSpeaker.isLocal ? localCameraStream : (activeSpeaker.cameraStream || remoteCameraStreams?.get(activeSpeaker.id))}
+              screenStream={activeSpeaker.isLocal ? localScreenStream : (activeSpeaker.screenStream || remoteScreenStreams?.get(activeSpeaker.id))}
               isLocal={activeSpeaker.isLocal}
               isSpeaking={true}
               isLarge={true}
+              showPiP={true}
             />
           )}
         </div>
@@ -179,8 +182,11 @@ export default function VideoGrid({
                 <VideoTile
                   participant={participant}
                   stream={participant.isLocal ? localStream : (participant.stream || remoteStreams?.get(participant.id))}
+                  cameraStream={participant.isLocal ? localCameraStream : (participant.cameraStream || remoteCameraStreams?.get(participant.id))}
+                  screenStream={participant.isLocal ? localScreenStream : (participant.screenStream || remoteScreenStreams?.get(participant.id))}
                   isLocal={participant.isLocal}
                   isSpeaking={false}
+                  showPiP={true}
                 />
               </div>
             ))}
@@ -204,9 +210,12 @@ export default function VideoGrid({
               key={mainParticipant.id}
               participant={mainParticipant}
               stream={mainParticipant.isLocal ? localStream : (mainParticipant.stream || remoteStreams?.get(mainParticipant.id))}
+              cameraStream={mainParticipant.isLocal ? localCameraStream : (mainParticipant.cameraStream || remoteCameraStreams?.get(mainParticipant.id))}
+              screenStream={mainParticipant.isLocal ? localScreenStream : (mainParticipant.screenStream || remoteScreenStreams?.get(mainParticipant.id))}
               isLocal={mainParticipant.isLocal}
               isSpeaking={mainParticipant.id === activeSpeakerId}
               isLarge={true}
+              showPiP={true}
             />
           )}
         </div>
@@ -218,8 +227,11 @@ export default function VideoGrid({
                 key={participant.id}
                 participant={participant}
                 stream={participant.isLocal ? localStream : (participant.stream || remoteStreams?.get(participant.id))}
+                cameraStream={participant.isLocal ? localCameraStream : (participant.cameraStream || remoteCameraStreams?.get(participant.id))}
+                screenStream={participant.isLocal ? localScreenStream : (participant.screenStream || remoteScreenStreams?.get(participant.id))}
                 isLocal={participant.isLocal}
                 isSpeaking={participant.id === activeSpeakerId}
+                showPiP={true}
               />
             ))}
           </div>

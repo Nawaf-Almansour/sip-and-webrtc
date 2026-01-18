@@ -13,11 +13,6 @@ interface PeerConnection {
   screenStream?: MediaStream;
 }
 
-const ICE_SERVERS = [
-  { urls: 'stun:stun.l.google.com:19302' },
-  { urls: 'stun:stun1.l.google.com:19302' },
-];
-
 export class WebRTCService {
   private ws: WebSocket | null = null;
   private localStream: MediaStream | null = null;
@@ -28,9 +23,14 @@ export class WebRTCService {
   };
   private transceiverMap = new Map<string, string>();  // MID -> track type
   private peerConnections = new Map<string, PeerConnection>();
+  private pendingIceCandidates = new Map<string, RTCIceCandidateInit[]>();  // Queue ICE candidates
   private participantId: string = '';
   private meetingId: string = '';
   private displayName: string = '';
+  private iceServers: RTCIceServer[] = [
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:stun1.l.google.com:19302' },
+  ];
   private onRemoteStream: ((participantId: string, stream: MediaStream) => void) | null = null;
   private onRemoteCameraStream: ((participantId: string, stream: MediaStream) => void) | null = null;
   private onRemoteScreenStream: ((participantId: string, stream: MediaStream) => void) | null = null;
@@ -50,8 +50,13 @@ export class WebRTCService {
       onParticipantLeft: (participantId: string) => void;
       onParticipantJoined: (participantId: string, displayName: string) => void;
       onChatMessage?: (from: string, displayName: string, message: string, timestamp: string) => void;
-    }
+    },
+    iceServers?: RTCIceServer[]
   ) {
+    if (iceServers && iceServers.length > 0) {
+      this.iceServers = iceServers;
+      console.log('[WebRTC] Using provided ICE servers:', iceServers);
+    }
     this.meetingId = meetingId;
     this.participantId = participantId;
     this.displayName = displayName;
@@ -155,36 +160,31 @@ export class WebRTCService {
       return;
     }
 
-    const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+    console.log('[WebRTC] Creating peer connection, createOffer:', createOffer);
+    const pc = new RTCPeerConnection({ iceServers: this.iceServers });
 
-    // Add transceivers for each track type (audio, camera, screen)
-    const audioTransceiver = pc.addTransceiver('audio', { direction: 'sendrecv' });
-    const cameraTransceiver = pc.addTransceiver('video', { direction: 'sendrecv' });
-    const screenTransceiver = pc.addTransceiver('video', { direction: 'sendrecv' });
+    // Add local tracks using addTrack - this creates transceivers automatically
+    // and ensures sendrecv direction with actual tracks
+    if (this.localStream) {
+      this.localStream.getTracks().forEach(track => {
+        pc.addTrack(track, this.localStream!);
+        console.log(`[WebRTC] Added ${track.kind} track via addTrack`);
+      });
+    }
 
-    // Store MID mappings after negotiation
-    pc.addEventListener('negotiationneeded', () => {
-      if (audioTransceiver.mid) {
-        this.transceiverMap.set(audioTransceiver.mid, 'audio');
-      }
-      if (cameraTransceiver.mid) {
-        this.transceiverMap.set(cameraTransceiver.mid, 'camera');
-      }
-      if (screenTransceiver.mid) {
-        this.transceiverMap.set(screenTransceiver.mid, 'screen');
-      }
+    // Add a third transceiver for screen share (initially empty)
+    // Only do this for offerer to avoid duplicates
+    if (createOffer) {
+      const screenTransceiver = pc.addTransceiver('video', { direction: 'sendrecv' });
+      console.log('[WebRTC] Added screen transceiver for offer');
+    }
+
+    console.log('[WebRTC] Transceivers after setup:', pc.getTransceivers().length);
+
+    // Store MID mappings after SDP is created
+    pc.addEventListener('icegatheringstatechange', () => {
+      console.log('[WebRTC] ICE gathering state:', pc.iceGatheringState);
     });
-
-    // Assign local tracks to transceivers
-    if (this.localTracks.audio) {
-      await audioTransceiver.sender.replaceTrack(this.localTracks.audio);
-    }
-    if (this.localTracks.camera) {
-      await cameraTransceiver.sender.replaceTrack(this.localTracks.camera);
-    }
-    if (this.localTracks.screen) {
-      await screenTransceiver.sender.replaceTrack(this.localTracks.screen);
-    }
 
     pc.onicecandidate = (event) => {
       if (event.candidate) {
@@ -197,24 +197,44 @@ export class WebRTCService {
     };
 
     pc.ontrack = (event) => {
+      console.log('[WebRTC] ontrack event:', {
+        mid: event.transceiver.mid,
+        trackKind: event.track.kind,
+        trackLabel: event.track.label,
+        trackId: event.track.id,
+        streamId: event.streams[0]?.id,
+        transceiverDirection: event.transceiver.direction,
+        transceiverCurrentDirection: event.transceiver.currentDirection
+      });
+      
       const trackType = this.getTrackType(event.transceiver.mid, event.track.label);
       const stream = event.streams[0];
       const peerConn = this.peerConnections.get(remoteId);
       
-      if (!peerConn) return;
+      console.log('[WebRTC] Track type determined:', trackType, 'for mid:', event.transceiver.mid);
+      
+      if (!peerConn) {
+        console.warn('[WebRTC] No peer connection found for remote:', remoteId);
+        return;
+      }
 
-      // Handle different track types
-      if (trackType === 'camera') {
-        peerConn.cameraStream = stream;
-        this.onRemoteCameraStream?.(remoteId, stream);
-        this.onRemoteStream?.(remoteId, stream); // Backward compatibility
-      } else if (trackType === 'screen') {
-        peerConn.screenStream = stream;
-        this.onRemoteScreenStream?.(remoteId, stream);
-      } else {
-        // Fallback for audio or unknown
+      // Handle tracks by kind - first video is camera, audio is audio
+      if (event.track.kind === 'audio') {
+        console.log('[WebRTC] Received audio track from:', remoteId, 'stream:', stream?.id);
         peerConn.stream = stream;
         this.onRemoteStream?.(remoteId, stream);
+      } else if (event.track.kind === 'video') {
+        // First video track is camera, second is screen
+        if (!peerConn.cameraStream) {
+          console.log('[WebRTC] Received CAMERA video track from:', remoteId, 'stream:', stream?.id);
+          peerConn.cameraStream = stream;
+          this.onRemoteCameraStream?.(remoteId, stream);
+          this.onRemoteStream?.(remoteId, stream);
+        } else {
+          console.log('[WebRTC] Received SCREEN video track from:', remoteId, 'stream:', stream?.id);
+          peerConn.screenStream = stream;
+          this.onRemoteScreenStream?.(remoteId, stream);
+        }
       }
     };
 
@@ -253,6 +273,7 @@ export class WebRTCService {
   }
 
   private async handleOffer(fromId: string, offer: RTCSessionDescriptionInit) {
+    console.log(`[WebRTC] Received offer from ${fromId}`);
     let peerConn = this.peerConnections.get(fromId);
     
     if (!peerConn) {
@@ -264,38 +285,90 @@ export class WebRTCService {
 
     try {
       await peerConn.pc.setRemoteDescription(new RTCSessionDescription(offer));
+      console.log(`[WebRTC] Set remote description from ${fromId}`);
+      console.log(`[WebRTC] Transceivers after setRemoteDescription:`, peerConn.pc.getTransceivers().length);
+      
+      // Process any queued ICE candidates now that remote description is set
+      await this.processPendingIceCandidates(fromId);
+      
       const answer = await peerConn.pc.createAnswer();
       await peerConn.pc.setLocalDescription(answer);
+      console.log(`[WebRTC] Sending answer to ${fromId}`);
       this.send({
         type: 'answer',
         to: fromId,
         answer: peerConn.pc.localDescription,
       });
     } catch (err) {
-      console.error('Error handling offer:', err);
+      console.error('[WebRTC] Error handling offer:', err);
     }
   }
 
   private async handleAnswer(fromId: string, answer: RTCSessionDescriptionInit) {
+    console.log(`[WebRTC] Received answer from ${fromId}`);
     const peerConn = this.peerConnections.get(fromId);
     if (!peerConn) return;
 
     try {
       await peerConn.pc.setRemoteDescription(new RTCSessionDescription(answer));
+      console.log(`[WebRTC] Set remote description (answer) from ${fromId}`);
+      
+      // Process any queued ICE candidates now that remote description is set
+      await this.processPendingIceCandidates(fromId);
     } catch (err) {
-      console.error('Error handling answer:', err);
+      console.error('[WebRTC] Error handling answer:', err);
     }
   }
 
   private async handleIceCandidate(fromId: string, candidate: RTCIceCandidateInit) {
     const peerConn = this.peerConnections.get(fromId);
-    if (!peerConn) return;
+    
+    if (!peerConn) {
+      // Queue ICE candidate if peer connection doesn't exist yet
+      console.log(`[WebRTC] Queuing ICE candidate for ${fromId} (peer not ready)`);
+      if (!this.pendingIceCandidates.has(fromId)) {
+        this.pendingIceCandidates.set(fromId, []);
+      }
+      this.pendingIceCandidates.get(fromId)!.push(candidate);
+      return;
+    }
+
+    // Check if remote description is set
+    if (!peerConn.pc.remoteDescription) {
+      console.log(`[WebRTC] Queuing ICE candidate for ${fromId} (no remote description)`);
+      if (!this.pendingIceCandidates.has(fromId)) {
+        this.pendingIceCandidates.set(fromId, []);
+      }
+      this.pendingIceCandidates.get(fromId)!.push(candidate);
+      return;
+    }
 
     try {
       await peerConn.pc.addIceCandidate(new RTCIceCandidate(candidate));
+      console.log(`[WebRTC] Added ICE candidate from ${fromId}`);
     } catch (err) {
-      console.error('Error adding ICE candidate:', err);
+      console.error('[WebRTC] Error adding ICE candidate:', err);
     }
+  }
+
+  private async processPendingIceCandidates(remoteId: string) {
+    const pending = this.pendingIceCandidates.get(remoteId);
+    if (!pending || pending.length === 0) return;
+
+    const peerConn = this.peerConnections.get(remoteId);
+    if (!peerConn || !peerConn.pc.remoteDescription) return;
+
+    console.log(`[WebRTC] Processing ${pending.length} pending ICE candidates for ${remoteId}`);
+    
+    for (const candidate of pending) {
+      try {
+        await peerConn.pc.addIceCandidate(new RTCIceCandidate(candidate));
+      } catch (err) {
+        console.error('[WebRTC] Error adding pending ICE candidate:', err);
+      }
+    }
+    
+    this.pendingIceCandidates.delete(remoteId);
   }
 
   private closePeerConnection(remoteId: string) {
@@ -326,14 +399,15 @@ export class WebRTCService {
     // Update all peer connections
     const promises = Array.from(this.peerConnections.values()).map(async (peerConn) => {
       const transceivers = peerConn.pc.getTransceivers();
-      // Camera transceiver is at index 1 (audio=0, camera=1, screen=2)
-      const cameraTransceiver = transceivers[1];
+      // Find the first video transceiver (camera) - it's the one we added with addTrack
+      const videoTransceivers = transceivers.filter(t => t.receiver.track?.kind === 'video' || t.sender.track?.kind === 'video');
+      const cameraTransceiver = videoTransceivers[0]; // First video is camera
       
-      if (cameraTransceiver?.sender && cameraTransceiver.sender.track?.kind === 'video') {
+      if (cameraTransceiver?.sender) {
         await cameraTransceiver.sender.replaceTrack(track);
         console.log('[WebRTC] Camera track replaced successfully');
       } else {
-        console.warn('[WebRTC] Camera transceiver not found or not video');
+        console.warn('[WebRTC] Camera transceiver not found');
       }
     });
     
@@ -347,14 +421,56 @@ export class WebRTCService {
     // Update all peer connections
     const promises = Array.from(this.peerConnections.values()).map(async (peerConn) => {
       const transceivers = peerConn.pc.getTransceivers();
-      // Screen transceiver is at index 2 (audio=0, camera=1, screen=2)
-      const screenTransceiver = transceivers[2];
+      console.log('[WebRTC] All transceivers for screen share:', transceivers.map((t, i) => ({
+        index: i,
+        mid: t.mid,
+        direction: t.direction,
+        senderTrackKind: t.sender.track?.kind,
+        receiverTrackKind: t.receiver.track?.kind
+      })));
+      
+      // Find the screen transceiver - it's the video transceiver WITHOUT a sender track
+      // (audio and camera transceivers have tracks from addTrack)
+      let screenTransceiver = transceivers.find(t => 
+        t.receiver.track?.kind === 'video' && !t.sender.track
+      );
+      
+      // If no empty video transceiver, this might be a renegotiation - find by stored reference
+      // or use the last video transceiver
+      if (!screenTransceiver) {
+        const videoTransceivers = transceivers.filter(t => 
+          t.receiver.track?.kind === 'video' || t.sender.track?.kind === 'video'
+        );
+        // Last video transceiver is screen (we add camera first, then screen)
+        if (videoTransceivers.length >= 2) {
+          screenTransceiver = videoTransceivers[videoTransceivers.length - 1];
+        }
+      }
       
       if (screenTransceiver?.sender) {
         await screenTransceiver.sender.replaceTrack(track);
-        console.log('[WebRTC] Screen track replaced successfully for peer');
+        console.log('[WebRTC] Screen track replaced successfully, mid:', screenTransceiver.mid);
+        
+        // If adding track, we need to renegotiate to inform the remote peer
+        if (track) {
+          console.log('[WebRTC] Renegotiating after screen track added');
+          const offer = await peerConn.pc.createOffer();
+          await peerConn.pc.setLocalDescription(offer);
+          
+          // Find the remote ID for this peer connection
+          for (const [remoteId, conn] of this.peerConnections.entries()) {
+            if (conn === peerConn) {
+              this.send({
+                type: 'offer',
+                to: remoteId,
+                offer: peerConn.pc.localDescription,
+              });
+              break;
+            }
+          }
+        }
       } else {
-        console.warn('[WebRTC] Screen transceiver not found');
+        console.warn('[WebRTC] Screen transceiver not found, total transceivers:', transceivers.length);
       }
     });
     

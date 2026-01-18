@@ -5,6 +5,8 @@ export type ConnectionMode = 'webrtc' | 'verto';
 
 export interface MediaServiceCallbacks {
   onRemoteStream?: (participantId: string, stream: MediaStream) => void;
+  onRemoteCameraStream?: (participantId: string, stream: MediaStream) => void;
+  onRemoteScreenStream?: (participantId: string, stream: MediaStream) => void;
   onParticipantLeft?: (participantId: string) => void;
   onParticipantJoined?: (participantId: string, name: string) => void;
   onChatMessage?: (from: string, senderName: string, message: string, timestamp: number) => void;
@@ -20,6 +22,7 @@ export interface MediaServiceConfig {
   displayName: string;
   localStream: MediaStream;
   vertoConfig?: VertoConfig;
+  turnConfig?: { urls: string | string[]; username?: string; credential?: string };
   callbacks: MediaServiceCallbacks;
 }
 
@@ -48,6 +51,22 @@ class MediaService {
   private async connectWebRTC(config: MediaServiceConfig): Promise<void> {
     console.log('[MediaService] Using WebRTC P2P mode');
     
+    // Build ICE servers array
+    const iceServers: RTCIceServer[] = [
+      { urls: 'stun:stun.l.google.com:19302' },
+      { urls: 'stun:stun1.l.google.com:19302' },
+    ];
+    
+    // Add TURN server if provided
+    if (config.turnConfig) {
+      iceServers.push({
+        urls: config.turnConfig.urls,
+        username: config.turnConfig.username,
+        credential: config.turnConfig.credential,
+      });
+      console.log('[MediaService] TURN server configured:', config.turnConfig.urls);
+    }
+    
     webrtcService.connect(
       config.meetingId,
       config.participantId,
@@ -56,6 +75,14 @@ class MediaService {
       {
         onRemoteStream: (participantId, stream) => {
           config.callbacks.onRemoteStream?.(participantId, stream);
+        },
+        onRemoteCameraStream: (participantId, stream) => {
+          console.log('[MediaService] Remote camera stream received:', participantId);
+          config.callbacks.onRemoteCameraStream?.(participantId, stream);
+        },
+        onRemoteScreenStream: (participantId, stream) => {
+          console.log('[MediaService] Remote screen stream received:', participantId);
+          config.callbacks.onRemoteScreenStream?.(participantId, stream);
         },
         onParticipantLeft: (participantId) => {
           config.callbacks.onParticipantLeft?.(participantId);
@@ -66,7 +93,8 @@ class MediaService {
         onChatMessage: (from, displayName, message, timestamp) => {
           config.callbacks.onChatMessage?.(from, displayName, message, typeof timestamp === 'string' ? parseInt(timestamp) : timestamp);
         },
-      }
+      },
+      iceServers
     );
   }
 
@@ -198,15 +226,23 @@ class MediaService {
   }
 
   async setScreenTrack(track: MediaStreamTrack | null): Promise<void> {
-    if (this.mode === 'webrtc') {
-      await webrtcService.setScreenTrack(track);
-    } else if (this.mode === 'verto') {
-      // Phase 2: Verto screen share via separate call
-      if (track && this.config) {
-        const screenStream = new MediaStream([track]);
-        await vertoService.startScreenShare(this.config.meetingId, screenStream);
-      } else {
-        await vertoService.stopScreenShare();
+    console.log('[MediaService] setScreenTrack called, mode:', this.mode, 'track:', track ? 'active' : 'null');
+    
+    // Always use WebRTC for screen track in P2P signaling
+    // Even in "verto" mode, we use WebRTC P2P for participant communication
+    await webrtcService.setScreenTrack(track);
+    
+    // Additionally, if in verto mode and connected to FreeSWITCH, also share via Verto
+    if (this.mode === 'verto' && vertoService.isConnected()) {
+      try {
+        if (track && this.config) {
+          const screenStream = new MediaStream([track]);
+          await vertoService.startScreenShare(this.config.meetingId, screenStream);
+        } else {
+          await vertoService.stopScreenShare();
+        }
+      } catch (err) {
+        console.warn('[MediaService] Verto screen share failed (non-critical):', err);
       }
     }
   }

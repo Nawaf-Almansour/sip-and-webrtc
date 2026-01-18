@@ -97,7 +97,7 @@ services:
       SIP_DOMAIN: 192.168.100.218
       WSS_URL: wss://192.168.100.218:8443
       STUN_URL: stun:stun.l.google.com:19302
-      TURN_URL: turn:localhost:3478
+      TURN_URL: turn:192.168.100.218:3478
       TURN_USERNAME: turnuser
       TURN_PASSWORD: turnpassword
       TOKEN_SECRET: your-secret-key-change-in-production

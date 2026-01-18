@@ -44,6 +44,8 @@ export default function Meeting() {
   const [error, setError] = useState<string | null>(null);
   const [participants, setParticipants] = useState<Participant[]>([]);
   const [remoteStreams, setRemoteStreams] = useState<Map<string, MediaStream>>(new Map());
+  const [remoteCameraStreams, setRemoteCameraStreams] = useState<Map<string, MediaStream>>(new Map());
+  const [remoteScreenStreams, setRemoteScreenStreams] = useState<Map<string, MediaStream>>(new Map());
   const [showParticipants, setShowParticipants] = useState(true);
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [localCameraStream, setLocalCameraStream] = useState<MediaStream | null>(null);
@@ -197,6 +199,7 @@ export default function Meeting() {
             participantId: data.participantId,
             displayName,
             localStream: localStreamRef.current,
+            turnConfig: data.turnConfig,
             vertoConfig: connectionMode === 'verto' ? {
               wssUrl: data.wssUrl || 'ws://localhost:8081',
               login: '1000@172.17.0.3',
@@ -210,9 +213,27 @@ export default function Meeting() {
                 console.log('Received remote stream from:', participantId);
                 setRemoteStreams(prev => new Map(prev).set(participantId, stream));
               },
+              onRemoteCameraStream: (participantId: string, stream: MediaStream) => {
+                console.log('[Meeting] Received remote camera stream from:', participantId);
+                setRemoteCameraStreams(prev => new Map(prev).set(participantId, stream));
+              },
+              onRemoteScreenStream: (participantId: string, stream: MediaStream) => {
+                console.log('[Meeting] Received remote screen stream from:', participantId);
+                setRemoteScreenStreams(prev => new Map(prev).set(participantId, stream));
+              },
               onParticipantLeft: (participantId: string) => {
                 console.log('Participant left:', participantId);
                 setRemoteStreams(prev => {
+                  const newMap = new Map(prev);
+                  newMap.delete(participantId);
+                  return newMap;
+                });
+                setRemoteCameraStreams(prev => {
+                  const newMap = new Map(prev);
+                  newMap.delete(participantId);
+                  return newMap;
+                });
+                setRemoteScreenStreams(prev => {
                   const newMap = new Map(prev);
                   newMap.delete(participantId);
                   return newMap;
@@ -437,6 +458,8 @@ export default function Meeting() {
             localCameraStream={localCameraStream}
             localScreenStream={localScreenStream}
             remoteStreams={remoteStreams}
+            remoteCameraStreams={remoteCameraStreams}
+            remoteScreenStreams={remoteScreenStreams}
             layout={layout}
             activeSpeakerId={activeSpeakerId}
           />
