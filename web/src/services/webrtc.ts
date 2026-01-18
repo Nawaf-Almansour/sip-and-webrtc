@@ -320,20 +320,20 @@ export class WebRTCService {
   }
 
   async setCameraTrack(track: MediaStreamTrack | null) {
-    console.log('[WebRTC] Setting camera track');
+    console.log('[WebRTC] Setting camera track:', track ? 'active' : 'null');
     this.localTracks.camera = track;
     
     // Update all peer connections
     const promises = Array.from(this.peerConnections.values()).map(async (peerConn) => {
       const transceivers = peerConn.pc.getTransceivers();
-      // Find camera transceiver (second video transceiver, index 1)
-      const cameraTransceiver = transceivers.find((t, idx) => 
-        t.receiver.track?.kind === 'video' && idx === 1
-      );
+      // Camera transceiver is at index 1 (audio=0, camera=1, screen=2)
+      const cameraTransceiver = transceivers[1];
       
-      if (cameraTransceiver?.sender) {
+      if (cameraTransceiver?.sender && cameraTransceiver.sender.track?.kind === 'video') {
         await cameraTransceiver.sender.replaceTrack(track);
         console.log('[WebRTC] Camera track replaced successfully');
+      } else {
+        console.warn('[WebRTC] Camera transceiver not found or not video');
       }
     });
     
@@ -341,20 +341,20 @@ export class WebRTCService {
   }
 
   async setScreenTrack(track: MediaStreamTrack | null) {
-    console.log('[WebRTC] Setting screen track');
+    console.log('[WebRTC] Setting screen track:', track ? 'active' : 'null');
     this.localTracks.screen = track;
     
     // Update all peer connections
     const promises = Array.from(this.peerConnections.values()).map(async (peerConn) => {
       const transceivers = peerConn.pc.getTransceivers();
-      // Find screen transceiver (third video transceiver, index 2)
-      const screenTransceiver = transceivers.find((t, idx) => 
-        t.receiver.track?.kind === 'video' && idx === 2
-      );
+      // Screen transceiver is at index 2 (audio=0, camera=1, screen=2)
+      const screenTransceiver = transceivers[2];
       
       if (screenTransceiver?.sender) {
         await screenTransceiver.sender.replaceTrack(track);
-        console.log('[WebRTC] Screen track replaced successfully');
+        console.log('[WebRTC] Screen track replaced successfully for peer');
+      } else {
+        console.warn('[WebRTC] Screen transceiver not found');
       }
     });
     
