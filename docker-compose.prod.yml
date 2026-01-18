@@ -46,19 +46,26 @@ services:
     restart: unless-stopped
 
   freeswitch:
-    image: safarov/freeswitch:latest
+    image: drachtio/drachtio-freeswitch-mrf:latest
     ports:
       - "5060:5060/udp"
       - "5060:5060/tcp"
       - "5066:5066/tcp"
       - "7443:7443/tcp"
       - "8021:8021/tcp"
+      - "8443:8443/tcp"
       - "16384-16484:16384-16484/udp"
+    volumes:
+      - ./infra/freeswitch/conf:/etc/freeswitch:ro
+      - ./infra/certs:/etc/freeswitch/certs:ro
     environment:
-      - FREESWITCH_DOMAIN=localhost
-      - OTEL_EXPORTER_OTLP_ENDPOINT=
+      - FREESWITCH_DOMAIN=192.168.100.218
     healthcheck:
-      disable: true
+      test: ["CMD", "fs_cli", "-x", "status"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
     restart: unless-stopped
     depends_on:
       - redis
@@ -110,7 +117,7 @@ services:
       drachtio:
         condition: service_started
       freeswitch:
-        condition: service_started
+        condition: service_healthy
     restart: unless-stopped
 
   frontend:
