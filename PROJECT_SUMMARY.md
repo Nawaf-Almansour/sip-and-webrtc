@@ -145,6 +145,193 @@ A production-ready video conferencing platform with advanced multi-track support
 
 ---
 
+## 🔗 Integration: Core Features + Multi-Track System
+
+### How They Work Together
+
+The platform integrates **Core Features** (meeting rooms, chat, host controls) with the **Multi-Track System** (simultaneous camera + screen share) through a unified architecture:
+
+```
+USER ACTIONS                    CORE FEATURES              MULTI-TRACK SYSTEM
+─────────────────────────────────────────────────────────────────────────────
+
+1. Create Meeting        →  Meeting Rooms            (Backend creates room)
+                         →  Database (PostgreSQL)    (Stores meeting data)
+
+2. Join Meeting          →  Dual Connection Modes   (Selects WebRTC P2P or SFU)
+                         →  Participant List        (Tracks active users)
+                         →  Local Media             (Camera + Microphone)
+
+3. Participants Join     →  Meeting Rooms           (Adds to participant list)
+                         →  Stream Routing          (Routes camera streams)
+                         →  VideoGrid Display       (Shows all participants)
+                         →  Active Speaker          (Highlights speaker)
+
+4. Share Screen          →  Host Controls           (Only host can share)
+                         →  Screen Capture          (getDisplayMedia())
+                         →  Multi-Track             (Simultaneous camera+screen)
+                         →  Picture-in-Picture      (Camera in PiP)
+                         →  Screen Indicator        (📺 badge)
+
+5. Send Chat Message     →  Real-time Chat          (Via signaling/Verto)
+                         →  Message History         (Stored in state)
+
+6. Mute/Unmute           →  Host Controls           (Mute other participants)
+                         →  Audio Track             (Enable/disable audio)
+                         →  Status Update           (API call)
+
+7. Stop Screen Share     →  Host Controls           (Stop sharing)
+                         →  Multi-Track             (Remove screen track)
+                         →  VideoGrid               (Return to normal layout)
+
+8. Leave Meeting         →  Meeting Rooms           (Remove from room)
+                         →  Cleanup                 (Stop all tracks)
+                         →  Notification            (Notify others)
+```
+
+### Component Responsibility Matrix
+
+```
+Component          Core Features              Multi-Track System
+─────────────────────────────────────────────────────────────────
+Meeting.tsx        ✅ Orchestrates all        ✅ Manages local tracks
+                   ✅ Participant list        ✅ Connection mode selection
+                   ✅ Chat messages           ✅ Screen share lifecycle
+                   ✅ Host controls           ✅ Track replacement
+
+VideoGrid.tsx      ✅ Renders layouts         ✅ Picture-in-Picture
+                   ✅ Active speaker          ✅ Stream display
+                   ✅ Audio playback          ✅ Screen indicator
+
+MediaService       ✅ Abstraction layer       ✅ Unified API
+                   ✅ Mode switching          ✅ Track management
+                   ✅ Callbacks               ✅ Stream routing
+
+WebRTC.ts          ✅ P2P signaling           ✅ 3 transceivers
+                   ✅ Peer connections        ✅ MID-based tracking
+                   ✅ Track events            ✅ Track replacement
+
+VertoService.ts    ✅ SIP signaling           ✅ Dual SIP calls
+                   ✅ Conference calls        ✅ Separate screen call
+                   ✅ Stream mixing           ✅ No audio on screen
+```
+
+### Data Flow: Meeting Room with Screen Share
+
+```
+PARTICIPANT A                              PARTICIPANT B
+─────────────────────────────────────────────────────────────
+
+1. Join Meeting
+   ├─ Get local camera/audio
+   ├─ Detect participant count (2)
+   ├─ Select WebRTC P2P mode
+   └─ Create peer connection to B
+
+2. Receive B's Streams
+   ├─ remoteCameraStreams[B.id]
+   ├─ remoteScreenStreams[B.id] (empty)
+   └─ Display in VideoGrid
+
+3. Share Screen
+   ├─ getDisplayMedia() → screen track
+   ├─ setScreenTrack(screenTrack)
+   ├─ Replace transceiver[2] with screen
+   ├─ Emit onRemoteScreenStream
+   └─ B receives screen stream
+
+4. B Receives Screen
+   ├─ onRemoteScreenStream callback
+   ├─ remoteCameraStreams[A.id] (camera)
+   ├─ remoteScreenStreams[A.id] (screen)
+   ├─ VideoGrid switches to PiP
+   │  ├─ Large: Screen (A's screen)
+   │  └─ Small: Camera (A's camera)
+   └─ Shows 📺 indicator
+
+5. Stop Screen Share
+   ├─ setScreenTrack(null)
+   ├─ Remove screen transceiver
+   ├─ Emit onRemoteScreenStream(null)
+   └─ B's VideoGrid returns to normal
+```
+
+### Connection Mode Decision Logic
+
+```
+Participant Count Detection
+        ↓
+    ┌───────────────────────┐
+    │ Count ≤ 4?            │
+    └───────────────────────┘
+         ↙              ↘
+      YES              NO
+       ↓                ↓
+  WebRTC P2P      FreeSWITCH SFU
+  ┌──────────┐    ┌──────────────┐
+  │ 3 Trans. │    │ 2 SIP Calls  │
+  │ Per Conn │    │ Per Participant
+  │ MID-based│    │ Separate     │
+  │ Tracking │    │ Conferences  │
+  └──────────┘    └──────────────┘
+```
+
+### Stream Routing: How Tracks Reach VideoGrid
+
+```
+LOCAL TRACKS                    REMOTE STREAMS              VIDEOGRID
+─────────────────────────────────────────────────────────────────────
+
+Audio Track ──┐
+              ├─→ Local Stream ──→ localCameraStream ──→ VideoTile
+Camera Track ─┤                                          (Local)
+              ├─→ Audio Element ──→ Audio Playback
+Screen Track ─┘
+
+                Remote Audio ──→ remoteStreams[id] ──→ Audio Element
+                Remote Camera ──→ remoteCameraStreams[id] ──→ VideoTile
+                Remote Screen ──→ remoteScreenStreams[id] ──→ VideoTile (PiP)
+```
+
+### Feature Integration Example: Screen Share Flow
+
+```
+User clicks "Share Screen"
+        ↓
+Meeting.tsx: handleScreenShare()
+        ↓
+getDisplayMedia() → screen track
+        ↓
+MediaService.setScreenTrack(screenTrack)
+        ↓
+┌─────────────────────────────────────┐
+│ Connection Mode?                    │
+└─────────────────────────────────────┘
+    ↙                              ↘
+WebRTC P2P                    FreeSWITCH SFU
+    ↓                              ↓
+WebRTC.setScreenTrack()       VertoService.startScreenShare()
+    ├─ Find transceiver[2]         ├─ Create new peer connection
+    ├─ replaceTrack(screen)        ├─ Add screen track (video only)
+    ├─ Emit onRemoteScreenStream   ├─ INVITE room-{id}-screen
+    └─ B receives screen           └─ B receives screen
+        ↓                              ↓
+Meeting.tsx: onRemoteScreenStream  Meeting.tsx: onRemoteScreenStream
+        ↓                              ↓
+setRemoteScreenStreams[B.id]       setRemoteScreenStreams[B.id]
+        ↓                              ↓
+VideoGrid receives props            VideoGrid receives props
+        ↓                              ↓
+VideoTile: screenStream available   VideoTile: screenStream available
+        ↓                              ↓
+Switch to Picture-in-Picture        Switch to Picture-in-Picture
+        ├─ Large: Screen (B's)       ├─ Large: Screen (B's)
+        ├─ Small: Camera (B's)       ├─ Small: Camera (B's)
+        └─ Show 📺 indicator         └─ Show 📺 indicator
+```
+
+---
+
 ## 🏗️ Architecture
 
 ### System Overview

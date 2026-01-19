@@ -28,6 +28,362 @@
 - 📌 **Sidebar Layout** - Main view with participant sidebar
 - 🔊 **Active Speaker Detection** - Automatic speaker highlighting
 
+## 🔗 How Core Features & Multi-Track System Work Together
+
+### User Journey: Meeting Room with Screen Share
+
+```
+1. USER CREATES MEETING (Core Feature: Meeting Rooms)
+   ├─ Backend creates meeting room
+   ├─ Generates unique meeting ID
+   └─ Stores in PostgreSQL
+
+2. USER JOINS MEETING (Core Feature: Dual Connection Modes)
+   ├─ Frontend detects participant count
+   ├─ Selects connection mode:
+   │  ├─ 2-4 participants → WebRTC P2P mode
+   │  └─ 5+ participants → FreeSWITCH SFU mode
+   ├─ Gets local camera/microphone (Multi-Track: Camera track)
+   └─ Establishes connection
+
+3. PARTICIPANTS JOIN (Core Feature: Meeting Rooms + Multi-Track)
+   ├─ Each participant gets unique ID
+   ├─ Streams routed based on connection mode:
+   │  ├─ WebRTC P2P: Direct peer connections with multiple transceivers
+   │  └─ FreeSWITCH SFU: Separate SIP calls to conferences
+   ├─ VideoGrid displays all participants (Core Feature: Layout Options)
+   └─ Active Speaker Detection highlights speaker
+
+4. USER SHARES SCREEN (Multi-Track: Screen Share)
+   ├─ User clicks "Share Screen"
+   ├─ Browser requests screen permission
+   ├─ Gets screen capture track (Multi-Track: Screen track)
+   ├─ Sends to all participants:
+   │  ├─ WebRTC P2P: Replaces screen transceiver track
+   │  └─ FreeSWITCH SFU: Creates separate SIP call to screen conference
+   ├─ VideoGrid switches to Picture-in-Picture layout
+   │  ├─ Large: Screen share
+   │  └─ Small: Camera (bottom-right)
+   └─ Screen Share Indicator shows active share
+
+5. REAL-TIME INTERACTION (Core Features: Chat + Host Controls)
+   ├─ Chat messages sent via signaling (WebRTC) or Verto (SIP)
+   ├─ Host can mute/unmute participants
+   ├─ Host can kick participants
+   ├─ Connection Quality monitored in real-time
+   └─ All participants see updates immediately
+
+6. USER STOPS SCREEN SHARE (Multi-Track: Screen Share)
+   ├─ User clicks "Stop Sharing"
+   ├─ Screen track removed:
+   │  ├─ WebRTC P2P: Removes screen transceiver
+   │  └─ FreeSWITCH SFU: Ends screen conference call
+   ├─ Camera becomes main video again
+   └─ VideoGrid returns to normal layout
+
+7. USER LEAVES MEETING (Core Feature: Meeting Rooms)
+   ├─ All tracks stopped
+   ├─ Connections closed
+   ├─ Participant removed from room
+   └─ Other participants notified
+```
+
+### Architecture Decision: When to Use Which Mode
+
+| Scenario | Connection Mode | Why |
+|----------|-----------------|-----|
+| 2 people, 1:1 call | WebRTC P2P | Direct connection, lowest latency |
+| 3-4 people, meeting | WebRTC P2P | N² connections manageable, no server needed |
+| 5+ people, meeting | FreeSWITCH SFU | Star topology, server handles mixing |
+| Screen share (any) | Multi-Track | Simultaneous camera + screen |
+| Large meeting (20+) | FreeSWITCH SFU | Scales to 50+ participants |
+
+### Participant Count Detection Logic
+
+The system automatically selects the optimal connection mode based on participant count:
+
+```
+Participant Count Detection
+        ↓
+    ┌───────────────────────┐
+    │ Count ≤ 4?            │
+    └───────────────────────┘
+         ↙              ↘
+      YES              NO
+       ↓                ↓
+  WebRTC P2P      FreeSWITCH MCU
+  ┌──────────┐    ┌──────────────┐
+  │ 3 Trans. │    │ MCU (SFU)    │
+  │ Per Conn │    │ 2 SIP Calls  │
+  │ MID-based│    │ Per Participant
+  │ Tracking │    │ Separate     │
+  │ No MCU   │    │ Conferences  │
+  └──────────┘    └──────────────┘
+```
+
+**WebRTC P2P (2-4 participants)**:
+- 3 transceivers per peer connection (audio, camera, screen)
+- MID-based track identification (browser-safe)
+- Direct peer-to-peer connections (no MCU)
+- Lowest latency, no server media processing
+- Scales well for N² connections
+- Each participant sends/receives individual streams
+
+**FreeSWITCH MCU/SFU (5+ participants)**:
+- **MCU (Media Control Unit)**: FreeSWITCH server acts as central mixer
+- 2 separate SIP calls per participant to MCU:
+  - Call 1: `room-{id}-main` (camera + audio) → main conference
+  - Call 2: `room-{id}-screen` (screen only, no audio) → screen conference
+- **MCU Responsibilities**:
+  - Mixes all participant streams in each conference
+  - Sends single mixed stream back to each participant
+  - Handles bandwidth optimization
+  - Manages separate audio/video conferences
+- Scales to 50+ participants
+- Reduces client CPU/bandwidth load
+- Star topology (all streams route through MCU)
+
+### Stream Routing: How Tracks Become Visible
+
+```
+WebRTC P2P Mode (2-4 participants):
+┌─────────────────────────────────────────────┐
+│ Participant A                               │
+├─────────────────────────────────────────────┤
+│ Local Tracks:                               │
+│ ├─ Audio track                              │
+│ ├─ Camera video track                       │
+│ └─ Screen video track (when sharing)        │
+│                                             │
+│ Peer Connection to B:                       │
+│ ├─ Audio transceiver (sendrecv)             │
+│ ├─ Camera transceiver (sendrecv)            │
+│ └─ Screen transceiver (sendrecv)            │
+│    └─ Identified by MID (browser-safe)      │
+│                                             │
+│ Remote Streams from B:                      │
+│ ├─ remoteCameraStreams[B.id]                │
+│ ├─ remoteScreenStreams[B.id]                │
+│ └─ Displayed in VideoGrid                   │
+└─────────────────────────────────────────────┘
+
+FreeSWITCH SFU Mode (5+ participants):
+┌─────────────────────────────────────────────┐
+│ Participant A                               │
+├─────────────────────────────────────────────┤
+│ Local Tracks:                               │
+│ ├─ Audio track                              │
+│ ├─ Camera video track                       │
+│ └─ Screen video track (when sharing)        │
+│                                             │
+│ SIP Call 1: room-{id}-main                  │
+│ ├─ Audio + Camera to FreeSWITCH             │
+│ └─ Receives mixed stream from conference    │
+│                                             │
+│ SIP Call 2: room-{id}-screen (if sharing)   │
+│ ├─ Screen only (no audio)                   │
+│ └─ Receives screen from conference          │
+│                                             │
+│ Remote Streams:                             │
+│ ├─ remoteCameraStreams[signalingId]         │
+│ ├─ remoteScreenStreams[signalingId]         │
+│ └─ Displayed in VideoGrid                   │
+└─────────────────────────────────────────────┘
+```
+
+### Component Integration
+
+```
+Meeting.tsx (Core orchestrator)
+├─ Manages connection mode selection
+├─ Handles participant list (Core: Meeting Rooms)
+├─ Manages local tracks (Multi-Track: Camera + Screen)
+├─ Routes streams to VideoGrid
+├─ Handles chat messages (Core: Real-time Chat)
+└─ Provides host controls (Core: Host Controls)
+    │
+    ├─ VideoGrid.tsx (Display layer)
+    │  ├─ Renders participants in selected layout
+    │  ├─ Picture-in-Picture for screen share
+    │  ├─ Active speaker highlighting
+    │  └─ Audio playback from remote streams
+    │
+    ├─ MediaService (Connection abstraction)
+    │  ├─ Switches between WebRTC & Verto
+    │  ├─ Manages local tracks
+    │  ├─ Handles track replacement
+    │  └─ Provides unified callback interface
+    │
+    ├─ WebRTC.ts (P2P implementation)
+    │  ├─ Creates peer connections
+    │  ├─ Manages 3 transceivers per connection
+    │  ├─ MID-based track identification
+    │  └─ Emits onRemoteCameraStream / onRemoteScreenStream
+    │
+    └─ VertoService.ts (SIP implementation)
+       ├─ Manages dual SIP calls
+       ├─ Handles screen share as separate call
+       └─ Emits onRemoteStream callbacks
+```
+
+## System Architecture Overview
+
+```
+┌─────────────┐     WSS      ┌─────────────────┐     WSS/Verto    ┌──────────────┐
+│   Client    │─────────────►│  MCU/Signaling  │────────────────►│  FreeSWITCH  │
+│  (Browser)  │◄─────────────│     Server      │◄────────────────│    Verto     │
+└─────────────┘   WebRTC     └─────────────────┘                  └──────────────┘
+       │                            │                                    │
+       │         DTLS/SRTP          │                                    │
+       └────────────────────────────┼────────────────────────────────────┘
+                                    │
+                              ┌─────▼─────┐
+                              │ Conference │
+                              │   Mixer    │
+                              │   (MCU)    │
+                              └─────┬─────┘
+                                    │
+                              Mixed Stream
+                                    │
+                              ┌─────▼─────┐
+                              │  Clients  │
+                              └───────────┘
+```
+
+### Architecture Components
+
+- **Client (Browser)**: React frontend with WebRTC capabilities
+- **MCU/Signaling Server**: Node.js backend handling meeting orchestration and signaling
+- **FreeSWITCH Verto**: Media server for conference mixing and SFU functionality
+- **Conference Mixer (MCU)**: Mixes audio/video from multiple participants
+- **DTLS/SRTP**: Encrypted media transport between clients and server
+- **WebSocket (WSS)**: Secure signaling channel for WebRTC P2P mode
+- **Verto Protocol**: SIP-based signaling for FreeSWITCH SFU mode
+
+## Server Requirements for Scaling
+
+### For 50 Participants (Single MCU Server)
+
+**FreeSWITCH MCU Server**:
+- **vCPU**: 16 vCPU (c5.4xlarge on AWS, or equivalent)
+- **RAM**: 32 GB
+- **Network**: 10 Gbps NIC
+- **Storage**: 500 GB SSD
+- **Configuration**:
+  - Main conference: 50 participants @ 720p@30fps
+  - Screen conference: 10 participants @ 1080p@15fps
+  - Bandwidth per participant: ~1.5 Mbps (camera + audio)
+  - Total bandwidth: ~75 Mbps uplink/downlink
+
+**Backend Server (Node.js)**:
+- **vCPU**: 4 vCPU (t3.xlarge on AWS)
+- **RAM**: 8 GB
+- **Storage**: 100 GB SSD
+- **Role**: Signaling only (media handled by FreeSWITCH)
+
+**Database Server (PostgreSQL)**:
+- **vCPU**: 4 vCPU (t3.xlarge on AWS)
+- **RAM**: 16 GB
+- **Storage**: 100 GB SSD
+- **Connection pool**: 100+ connections
+
+**TURN/STUN Server (coturn)**:
+- **vCPU**: 4 vCPU (t3.xlarge on AWS)
+- **RAM**: 8 GB
+- **Bandwidth**: ~50 Mbps
+
+**Total for 50 Users**:
+- **Total vCPU**: 28 vCPU
+- **Total RAM**: 64 GB
+- **Total Storage**: 700 GB SSD
+- **Estimated Cost** (AWS): ~$1,200-1,500/month
+
+### For 200 Participants (Distributed MCU Cluster)
+
+**Architecture**: Multiple FreeSWITCH MCU servers with load balancing
+
+**FreeSWITCH MCU Cluster** (4 servers recommended):
+- **vCPU per server**: 16 vCPU (c5.4xlarge on AWS)
+- **RAM per server**: 32 GB
+- **Storage per server**: 500 GB SSD
+- **Network**: 10 Gbps NIC per server
+- **Configuration**:
+  - 4 MCU servers × 50 participants = 200 total
+  - Each server handles 50 participants independently
+  - No inter-server media mixing (simplifies architecture)
+  - Total bandwidth: ~300 Mbps
+
+**Load Balancer**:
+- **vCPU**: 4 vCPU (t3.xlarge on AWS)
+- **RAM**: 8 GB
+- **Type**: nginx or HAProxy
+- **Features**:
+  - Connection distribution across 4 MCU servers
+  - Sticky sessions for WebSocket signaling
+  - Health checks every 5 seconds
+
+**Backend Server (Node.js) - Scaled**:
+- **Instances**: 2-4 behind load balancer
+- **vCPU per instance**: 4 vCPU (t3.xlarge on AWS)
+- **RAM per instance**: 8 GB
+- **Storage per instance**: 100 GB SSD
+- **Role**: Signaling only
+
+**Database (PostgreSQL) - Scaled**:
+- **vCPU**: 8 vCPU (c5.2xlarge on AWS)
+- **RAM**: 32 GB
+- **Storage**: 500 GB SSD
+- **Connection pool**: 200+ connections
+- **Read replicas**: 2 for scaling queries
+
+**TURN/STUN Server Cluster**:
+- **Servers**: 2-4 TURN servers
+- **vCPU per server**: 4 vCPU (t3.xlarge on AWS)
+- **RAM per server**: 8 GB
+- **Shared TURN secret**: For failover
+- **Total bandwidth**: ~300 Mbps
+
+**Network Infrastructure**:
+- **Internet**: 100 Mbps+ connection
+- **Redundancy**: Dual ISP with automatic failover
+- **CDN**: CloudFront or equivalent for static assets
+- **DDoS Protection**: AWS Shield or Cloudflare
+- **Monitoring**: Multi-region health checks
+
+**Total for 200 Users**:
+- **Total vCPU**: 92 vCPU (4×16 MCU + 4×4 backend + 4 LB + 8 DB + 4×4 TURN)
+- **Total RAM**: 256 GB
+- **Total Storage**: 3.5 TB SSD
+- **Estimated Cost** (AWS): ~$6,000-8,000/month
+
+### Performance Metrics
+
+| Metric | 50 Users | 200 Users |
+|--------|----------|-----------|
+| **Total Bandwidth** | ~75 Mbps | ~300 Mbps |
+| **CPU Usage** | 60-70% | 65-75% per server |
+| **Memory Usage** | 24 GB | 48 GB per server |
+| **Connections** | 50 | 50 per MCU × 4 |
+| **Latency** | <100ms | <150ms |
+| **Packet Loss** | <0.1% | <0.5% |
+
+### Optimization Tips
+
+**For 50 Users**:
+- Enable hardware video encoding (NVIDIA/Intel)
+- Use SSD for all storage
+- Monitor CPU/memory with Prometheus
+- Set up automated backups
+
+**For 200 Users**:
+- Implement geographic distribution (multiple regions)
+- Use dedicated TURN servers
+- Implement connection pooling
+- Enable media caching
+- Use container orchestration (Kubernetes)
+- Implement auto-scaling policies
+- Monitor with ELK stack (Elasticsearch, Logstash, Kibana)
+
 ## Tech Stack
 
 - **Frontend**: React 18 + TypeScript + Vite + TailwindCSS + Lucide Icons
@@ -342,7 +698,22 @@ fs_cli -x "reloadxml"
 - Features: Separate SIP calls, dual conferences, jitter buffer
 - Testing: Ready for manual testing
 
-### Phase 3: Production Polish 🔄
+### Phase 3: Remote Video Playback Fix ✅
+- Status: Complete
+- Root Cause: Participant ID mismatch between backend UUIDs and signaling IDs (guest-xxxx)
+- Solution: 
+  - Participant ID mapping between backend UUIDs and signaling IDs
+  - Streams stored under signaling IDs as received from WebRTC
+  - VideoGrid searches for streams by checking all available keys
+  - Heuristic: if only one remote stream exists, assign to remote participant
+- Features:
+  - ✅ Audio playback with bind-once pattern
+  - ✅ Video playback with proper stream routing
+  - ✅ No UI re-render loops
+  - ✅ Optimized logging (logs only on stream availability changes)
+- Testing: Ready for multi-participant testing
+
+### Phase 4: Production Polish 🔄
 - Status: In Progress
 - Focus: Documentation, optimization, final testing
 
