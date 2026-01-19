@@ -643,11 +643,7 @@ export default function Meeting() {
             participants={videoParticipants} 
             localParticipantId={joinData?.participantId}
             localStream={localStream}
-            localCameraStream={localCameraStream}
-            localScreenStream={localScreenStream}
             remoteStreams={remoteStreams}
-            remoteCameraStreams={remoteCameraStreams}
-            remoteScreenStreams={remoteScreenStreams}
             layout={layout}
             activeSpeakerId={activeSpeakerId}
           />

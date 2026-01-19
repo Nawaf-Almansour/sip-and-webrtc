@@ -1,4 +1,4 @@
-import { useRef, useEffect, useState, useMemo } from 'react';
+import { useRef, useEffect, useMemo } from 'react';
 
 export type LayoutType = 'grid' | 'speaker' | 'sidebar' | 'presentation';
 
@@ -6,8 +6,6 @@ interface Participant {
   id: string;
   displayName: string;
   stream?: MediaStream | null;
-  cameraStream?: MediaStream | null;
-  screenStream?: MediaStream | null;
   isLocal?: boolean;
   isSpeaking?: boolean;
 }
@@ -16,44 +14,34 @@ interface VideoGridProps {
   participants: Participant[];
   localParticipantId?: string;
   localStream?: MediaStream | null;
-  localCameraStream?: MediaStream | null;
-  localScreenStream?: MediaStream | null;
   remoteStreams?: Map<string, MediaStream>;
-  remoteCameraStreams?: Map<string, MediaStream>;
-  remoteScreenStreams?: Map<string, MediaStream>;
   layout?: LayoutType;
   activeSpeakerId?: string | null;
 }
 
-function VideoTile({ participant, stream, cameraStream, screenStream, isLocal, isSpeaking, isLarge, showPiP }: { 
+function VideoTile({ participant, stream, isLocal, isSpeaking, isLarge }: { 
   participant: Participant; 
   stream?: MediaStream | null; 
-  cameraStream?: MediaStream | null;
-  screenStream?: MediaStream | null;
   isLocal?: boolean; 
   isSpeaking?: boolean; 
   isLarge?: boolean;
-  showPiP?: boolean;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
-  const pipVideoRef = useRef<HTMLVideoElement>(null);
-  const boundMainStreamRef = useRef<string | null>(null);
-  const boundPipStreamRef = useRef<string | null>(null);
+  const boundStreamRef = useRef<string | null>(null);
 
-  // Main video (screen if available, otherwise camera)
-  const mainStream = screenStream || cameraStream || stream;
-  const hasScreenShare = !!screenStream;
+  // Backend determines which stream to send (camera or screen)
+  const mainStream = stream;
 
   useEffect(() => {
     if (!videoRef.current) return;
     
     if (mainStream) {
-      if (boundMainStreamRef.current !== mainStream.id) {
+      if (boundStreamRef.current !== mainStream.id) {
         try {
           videoRef.current.srcObject = mainStream;
-          boundMainStreamRef.current = mainStream.id;
+          boundStreamRef.current = mainStream.id;
           const videoTracks = mainStream.getVideoTracks();
-          console.log('[VideoTile] Connected main video stream:', {
+          console.log('[VideoTile] Connected video stream:', {
             participantId: participant.id,
             displayName: participant.displayName,
             streamId: mainStream.id,
@@ -61,73 +49,29 @@ function VideoTile({ participant, stream, cameraStream, screenStream, isLocal, i
             audioTracks: mainStream.getAudioTracks().length,
           });
         } catch (error) {
-          console.error('[VideoTile] Error binding main stream:', error);
+          console.error('[VideoTile] Error binding stream:', error);
         }
       }
     } else {
-      // Clear stream if no mainStream
       if (videoRef.current.srcObject !== null) {
         videoRef.current.srcObject = null;
-        boundMainStreamRef.current = null;
+        boundStreamRef.current = null;
       }
     }
   }, [mainStream, participant.id]);
 
-  useEffect(() => {
-    if (!pipVideoRef.current) return;
-    
-    if (cameraStream && hasScreenShare) {
-      if (boundPipStreamRef.current !== cameraStream.id) {
-        try {
-          pipVideoRef.current.srcObject = cameraStream;
-          boundPipStreamRef.current = cameraStream.id;
-          console.log('[VideoTile] Connected PiP camera stream:', {
-            participantId: participant.id,
-            streamId: cameraStream.id,
-            videoTracks: cameraStream.getVideoTracks().length,
-          });
-        } catch (error) {
-          console.error('[VideoTile] Error binding PiP stream:', error);
-        }
-      }
-    } else {
-      // Clear PiP stream if conditions not met
-      if (pipVideoRef.current.srcObject !== null) {
-        pipVideoRef.current.srcObject = null;
-        boundPipStreamRef.current = null;
-      }
-    }
-  }, [cameraStream, hasScreenShare, participant.id]);
-
   const borderClass = isSpeaking ? 'border-4 border-green-500' : 'border-2 border-transparent';
 
   return (
-    <div className={`bg-gray-800 rounded-lg ${isLarge ? 'aspect-video' : 'aspect-video'} flex items-center justify-center relative overflow-hidden ${borderClass} transition-all duration-200`}>
+    <div className={`bg-gray-800 rounded-lg aspect-video flex items-center justify-center relative overflow-hidden ${borderClass} transition-all duration-200`}>
       {mainStream ? (
-        <>
-          <video
-            ref={videoRef}
-            autoPlay
-            playsInline
-            muted={isLocal}
-            className="w-full h-full object-cover"
-          />
-          {/* Picture-in-Picture: Show camera when screen sharing */}
-          {hasScreenShare && cameraStream && showPiP && (
-            <div className="absolute bottom-4 right-4 w-32 h-24 bg-gray-900 rounded-lg overflow-hidden border-2 border-white shadow-lg">
-              <video
-                ref={pipVideoRef}
-                autoPlay
-                playsInline
-                muted={isLocal}
-                className="w-full h-full object-cover"
-              />
-              <div className="absolute bottom-1 left-1 text-white text-xs bg-black/70 px-1 py-0.5 rounded">
-                Camera
-              </div>
-            </div>
-          )}
-        </>
+        <video
+          ref={videoRef}
+          autoPlay
+          playsInline
+          muted={isLocal}
+          className="w-full h-full object-cover"
+        />
       ) : (
         <div className="w-20 h-20 rounded-full bg-blue-600 flex items-center justify-center text-white text-3xl font-semibold">
           {participant.displayName.charAt(0).toUpperCase()}
@@ -135,7 +79,6 @@ function VideoTile({ participant, stream, cameraStream, screenStream, isLocal, i
       )}
       <div className="absolute bottom-2 left-2 text-white text-sm bg-black/50 px-2 py-1 rounded">
         {participant.displayName} {isLocal && '(You)'}
-        {hasScreenShare && <span className="ml-1 text-xs">📺</span>}
       </div>
       {!mainStream && !isLocal && (
         <div className="absolute top-2 right-2 text-yellow-400 text-xs bg-black/50 px-2 py-1 rounded">
@@ -150,28 +93,10 @@ export default function VideoGrid({
   participants, 
   localParticipantId,
   localStream, 
-  localCameraStream,
-  localScreenStream,
   remoteStreams, 
-  remoteCameraStreams,
-  remoteScreenStreams,
   layout = 'grid', 
   activeSpeakerId 
 }: VideoGridProps) {
-  // Layout is now determined by backend, use it directly
-  const effectiveLayout = layout;
-  
-  // Find who is sharing screen (for presentation mode)
-  const screenSharerId = useMemo(() => {
-    if (localScreenStream && localScreenStream.getVideoTracks().length > 0) {
-      return localParticipantId;
-    }
-    if (remoteScreenStreams && remoteScreenStreams.size > 0) {
-      return Array.from(remoteScreenStreams.keys())[0];
-    }
-    return null;
-  }, [localScreenStream, remoteScreenStreams, localParticipantId]);
-  
   const gridCols = participants.length <= 1 ? 1 : participants.length <= 4 ? 2 : 3;
 
   // Render hidden audio elements for all remote streams
@@ -215,159 +140,34 @@ export default function VideoGrid({
     }).filter(Boolean);
   }, [remoteStreams]);
 
-  // Log video stream availability only once per stream
-  const loggedCameraStreamsRef = useRef<Set<string>>(new Set());
-  const loggedScreenStreamsRef = useRef<Set<string>>(new Set());
-  
-  useEffect(() => {
-    if (remoteCameraStreams && remoteCameraStreams.size > 0) {
-      remoteCameraStreams.forEach((stream, participantId) => {
-        const streamKey = `${participantId}-${stream.id}`;
-        if (!loggedCameraStreamsRef.current.has(streamKey)) {
-          loggedCameraStreamsRef.current.add(streamKey);
-          const videoTracks = stream.getVideoTracks();
-          console.log('[VideoGrid] Camera stream available:', {
-            participantId,
-            streamId: stream.id,
-            videoTracks: videoTracks.length,
-          });
-        }
-      });
-    }
-  }, [remoteCameraStreams]);
-
-  useEffect(() => {
-    if (remoteScreenStreams && remoteScreenStreams.size > 0) {
-      remoteScreenStreams.forEach((stream, participantId) => {
-        const streamKey = `${participantId}-${stream.id}`;
-        if (!loggedScreenStreamsRef.current.has(streamKey)) {
-          loggedScreenStreamsRef.current.add(streamKey);
-          const videoTracks = stream.getVideoTracks();
-          console.log('[VideoGrid] Screen stream available:', {
-            participantId,
-            streamId: stream.id,
-            videoTracks: videoTracks.length,
-          });
-        }
-      });
-    }
-  }, [remoteScreenStreams]);
-
   const videoParticipants = useMemo(() => {
-    const result = participants.map(p => {
+    return participants.map(p => {
       const isLocal = p.id === localParticipantId;
-      const cameraStream = isLocal ? localCameraStream : remoteCameraStreams?.get(p.id);
-      const screenStream = isLocal ? localScreenStream : remoteScreenStreams?.get(p.id);
+      const stream = isLocal ? localStream : remoteStreams?.get(p.id);
 
-      // Debug: Log stream availability for each participant
-      if (cameraStream || screenStream) {
-        console.log('[VideoGrid] Participant streams:', {
-          participantId: p.id,
-          displayName: p.displayName,
-          isLocal,
-          hasCameraStream: !!cameraStream,
-          cameraStreamId: cameraStream?.id,
-          hasScreenStream: !!screenStream,
-          screenStreamId: screenStream?.id,
-          cameraVideoTracks: cameraStream?.getVideoTracks().length || 0,
-          screenVideoTracks: screenStream?.getVideoTracks().length || 0,
-        });
-      }
+      console.log('[VideoGrid] Participant stream:', {
+        participantId: p.id,
+        displayName: p.displayName,
+        isLocal,
+        hasStream: !!stream,
+        streamId: stream?.id,
+      });
 
       return {
         ...p,
         isLocal,
-        stream: undefined,
-        cameraStream,
-        screenStream,
+        stream,
       };
     });
-
-    // Debug: Log overall stream map status
-    console.log('[VideoGrid] Stream maps status:', {
-      totalParticipants: participants.length,
-      remoteCameraStreamsSize: remoteCameraStreams?.size || 0,
-      remoteScreenStreamsSize: remoteScreenStreams?.size || 0,
-      remoteCameraStreamKeys: Array.from(remoteCameraStreams?.keys() || []),
-      remoteScreenStreamKeys: Array.from(remoteScreenStreams?.keys() || []),
-      participantIds: participants.map(p => p.id),
-    });
-
-    return result;
   }, [
     participants,
     localParticipantId,
-    localCameraStream,
-    localScreenStream,
-    remoteCameraStreams,
-    remoteScreenStreams,
+    localStream,
+    remoteStreams,
   ]);
 
-  // Presentation Mode - screen share prominent with cameras in sidebar
-  if (effectiveLayout === 'presentation' && screenSharerId) {
-    const screenSharer = videoParticipants.find(p => p.id === screenSharerId);
-    const cameraParticipants = videoParticipants.filter(p => p.id !== screenSharerId);
-
-    return (
-      <>
-        {audioElements}
-        <div className="flex h-full gap-4">
-          {/* Main screen share view */}
-          <div className="flex-1 flex flex-col">
-            {screenSharer && (
-              <>
-                <div className="flex-1 mb-2">
-                  <VideoTile
-                    key={screenSharer.id}
-                    participant={screenSharer}
-                    stream={screenSharer.isLocal ? localStream : (screenSharer.stream || remoteStreams?.get(screenSharer.id))}
-                    cameraStream={screenSharer.isLocal ? localCameraStream : (screenSharer.cameraStream || remoteCameraStreams?.get(screenSharer.id))}
-                    screenStream={screenSharer.isLocal ? localScreenStream : (screenSharer.screenStream || remoteScreenStreams?.get(screenSharer.id))}
-                    isLocal={screenSharer.isLocal}
-                    isSpeaking={screenSharer.id === activeSpeakerId}
-                    isLarge={true}
-                    showPiP={true}
-                  />
-                </div>
-                <div className="text-white text-sm bg-blue-600/80 px-3 py-1 rounded text-center">
-                  📺 {screenSharer.displayName} is presenting
-                </div>
-              </>
-            )}
-          </div>
-          
-          {/* Camera participants sidebar */}
-          {cameraParticipants.length > 0 && (
-            <div className="w-72 flex flex-col gap-2 overflow-y-auto bg-gray-900/50 rounded-lg p-2">
-              <div className="text-white text-xs font-semibold px-2 py-1 sticky top-0 bg-gray-800 rounded">
-                Participants ({cameraParticipants.length})
-              </div>
-              {cameraParticipants.map((participant) => {
-                const isSpeaking = participant.id === activeSpeakerId;
-                const borderClass = isSpeaking ? 'border-4 border-green-500' : 'border-2 border-transparent';
-                return (
-                  <div key={participant.id} className={`flex-shrink-0 h-40 rounded-lg overflow-hidden ${borderClass} transition-all duration-200`}>
-                    <VideoTile
-                      participant={participant}
-                      stream={participant.isLocal ? localStream : (participant.stream || remoteStreams?.get(participant.id))}
-                      cameraStream={participant.isLocal ? localCameraStream : (participant.cameraStream || remoteCameraStreams?.get(participant.id))}
-                      screenStream={participant.isLocal ? localScreenStream : (participant.screenStream || remoteScreenStreams?.get(participant.id))}
-                      isLocal={participant.isLocal}
-                      isSpeaking={isSpeaking}
-                      showPiP={false}
-                    />
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      </>
-    );
-  }
-
   // Grid Layout - default responsive grid
-  if (effectiveLayout === 'grid') {
+  if (layout === 'grid') {
     return (
       <>
         {audioElements}
@@ -377,74 +177,51 @@ export default function VideoGrid({
             gridTemplateColumns: `repeat(${gridCols}, 1fr)`,
           }}
         >
-          {videoParticipants.map((participant) => {
-            const stream = participant.isLocal 
-              ? localStream 
-              : (participant.stream || remoteStreams?.get(participant.id));
-            const cameraStream = participant.isLocal
-              ? localCameraStream
-              : (participant.cameraStream || remoteCameraStreams?.get(participant.id));
-            const screenStream = participant.isLocal
-              ? localScreenStream
-              : (participant.screenStream || remoteScreenStreams?.get(participant.id));
-            const isSpeaking = participant.id === activeSpeakerId;
-            
-            return (
-              <VideoTile
-                key={participant.id}
-                participant={participant}
-                stream={stream}
-                cameraStream={cameraStream}
-                screenStream={screenStream}
-                isLocal={participant.isLocal}
-                isSpeaking={isSpeaking}
-                showPiP={true}
-              />
-            );
-          })}
+          {videoParticipants.map((participant) => (
+            <VideoTile
+              key={participant.id}
+              participant={participant}
+              stream={participant.stream}
+              isLocal={participant.isLocal}
+              isSpeaking={participant.id === activeSpeakerId}
+              isLarge={false}
+            />
+          ))}
         </div>
       </>
     );
   }
 
   // Speaker Layout - large active speaker with small thumbnails
-  if (effectiveLayout === 'speaker') {
-    const activeSpeaker = participants.find(p => p.id === activeSpeakerId) || participants[0];
-    const otherParticipants = participants.filter(p => p.id !== activeSpeaker?.id);
+  if (layout === 'speaker') {
+    const activeSpeaker = videoParticipants.find(p => p.id === activeSpeakerId) || videoParticipants[0];
+    const otherParticipants = videoParticipants.filter(p => p.id !== activeSpeaker?.id);
 
     return (
       <>
         {audioElements}
         <div className="flex flex-col h-full gap-4">
-          {/* Main speaker view */}
-          <div className="flex-1">
-            {activeSpeaker && (
+          {activeSpeaker && (
+            <div className="flex-1">
               <VideoTile
                 key={activeSpeaker.id}
                 participant={activeSpeaker}
-                stream={activeSpeaker.isLocal ? localStream : (activeSpeaker.stream || remoteStreams?.get(activeSpeaker.id))}
-                cameraStream={activeSpeaker.isLocal ? localCameraStream : (activeSpeaker.cameraStream || remoteCameraStreams?.get(activeSpeaker.id))}
-                screenStream={activeSpeaker.isLocal ? localScreenStream : (activeSpeaker.screenStream || remoteScreenStreams?.get(activeSpeaker.id))}
+                stream={activeSpeaker.stream}
                 isLocal={activeSpeaker.isLocal}
                 isSpeaking={true}
                 isLarge={true}
-                showPiP={true}
               />
-            )}
-          </div>
-          {/* Thumbnail strip */}
+            </div>
+          )}
           {otherParticipants.length > 0 && (
-            <div className="flex gap-2 h-32 overflow-x-auto">
+            <div className="flex gap-2 h-24 overflow-x-auto">
               {otherParticipants.map((participant) => (
-                <div key={participant.id} className="flex-shrink-0 w-48">
+                <div key={participant.id} className="flex-shrink-0 w-32">
                   <VideoTile
                     participant={participant}
-                    stream={participant.isLocal ? localStream : (participant.stream || remoteStreams?.get(participant.id))}
-                    cameraStream={participant.isLocal ? localCameraStream : (participant.cameraStream || remoteCameraStreams?.get(participant.id))}
-                    screenStream={participant.isLocal ? localScreenStream : (participant.screenStream || remoteScreenStreams?.get(participant.id))}
+                    stream={participant.stream}
                     isLocal={participant.isLocal}
-                    isSpeaking={false}
-                    showPiP={true}
+                    isSpeaking={participant.id === activeSpeakerId}
                   />
                 </div>
               ))}
@@ -456,45 +233,95 @@ export default function VideoGrid({
   }
 
   // Sidebar Layout - main view with sidebar of participants
-  if (effectiveLayout === 'sidebar') {
-    const mainParticipant = participants.find(p => p.id === activeSpeakerId) || participants[0];
-    const sidebarParticipants = participants.filter(p => p.id !== mainParticipant?.id);
+  if (layout === 'sidebar') {
+    const mainParticipant = videoParticipants.find(p => p.id === activeSpeakerId) || videoParticipants[0];
+    const sidebarParticipants = videoParticipants.filter(p => p.id !== mainParticipant?.id);
 
     return (
       <>
         {audioElements}
         <div className="flex h-full gap-4">
-          {/* Main view */}
           <div className="flex-1">
             {mainParticipant && (
               <VideoTile
                 key={mainParticipant.id}
                 participant={mainParticipant}
-                stream={mainParticipant.isLocal ? localStream : (mainParticipant.stream || remoteStreams?.get(mainParticipant.id))}
-                cameraStream={mainParticipant.isLocal ? localCameraStream : (mainParticipant.cameraStream || remoteCameraStreams?.get(mainParticipant.id))}
-                screenStream={mainParticipant.isLocal ? localScreenStream : (mainParticipant.screenStream || remoteScreenStreams?.get(mainParticipant.id))}
+                stream={mainParticipant.stream}
                 isLocal={mainParticipant.isLocal}
                 isSpeaking={mainParticipant.id === activeSpeakerId}
                 isLarge={true}
-                showPiP={true}
               />
             )}
           </div>
-          {/* Sidebar */}
           {sidebarParticipants.length > 0 && (
-            <div className="w-64 flex flex-col gap-2 overflow-y-auto">
+            <div className="w-72 flex flex-col gap-2 overflow-y-auto bg-gray-900/50 rounded-lg p-2">
+              <div className="text-white text-xs font-semibold px-2 py-1 sticky top-0 bg-gray-800 rounded">
+                Participants ({sidebarParticipants.length})
+              </div>
               {sidebarParticipants.map((participant) => (
-                <VideoTile
-                  key={participant.id}
-                  participant={participant}
-                  stream={participant.isLocal ? localStream : (participant.stream || remoteStreams?.get(participant.id))}
-                  cameraStream={participant.isLocal ? localCameraStream : (participant.cameraStream || remoteCameraStreams?.get(participant.id))}
-                  screenStream={participant.isLocal ? localScreenStream : (participant.screenStream || remoteScreenStreams?.get(participant.id))}
-                  isLocal={participant.isLocal}
-                  isSpeaking={participant.id === activeSpeakerId}
-                  showPiP={true}
-                />
+                <div key={participant.id} className="flex-shrink-0 h-40">
+                  <VideoTile
+                    participant={participant}
+                    stream={participant.stream}
+                    isLocal={participant.isLocal}
+                    isSpeaking={participant.id === activeSpeakerId}
+                  />
+                </div>
               ))}
+            </div>
+          )}
+        </div>
+      </>
+    );
+  }
+
+  // Presentation Layout - screen share prominent with cameras in sidebar
+  if (layout === 'presentation') {
+    const mainParticipant = videoParticipants[0];
+    const sidebarParticipants = videoParticipants.slice(1);
+
+    return (
+      <>
+        {audioElements}
+        <div className="flex h-full gap-4">
+          <div className="flex-1 flex flex-col">
+            {mainParticipant && (
+              <>
+                <div className="flex-1 mb-2">
+                  <VideoTile
+                    key={mainParticipant.id}
+                    participant={mainParticipant}
+                    stream={mainParticipant.stream}
+                    isLocal={mainParticipant.isLocal}
+                    isSpeaking={mainParticipant.id === activeSpeakerId}
+                    isLarge={true}
+                  />
+                </div>
+                <div className="text-white text-sm bg-blue-600/80 px-3 py-1 rounded text-center">
+                  📺 {mainParticipant.displayName} is presenting
+                </div>
+              </>
+            )}
+          </div>
+          {sidebarParticipants.length > 0 && (
+            <div className="w-72 flex flex-col gap-2 overflow-y-auto bg-gray-900/50 rounded-lg p-2">
+              <div className="text-white text-xs font-semibold px-2 py-1 sticky top-0 bg-gray-800 rounded">
+                Participants ({sidebarParticipants.length})
+              </div>
+              {sidebarParticipants.map((participant) => {
+                const isSpeaking = participant.id === activeSpeakerId;
+                const borderClass = isSpeaking ? 'border-4 border-green-500' : 'border-2 border-transparent';
+                return (
+                  <div key={participant.id} className={`flex-shrink-0 h-40 rounded-lg overflow-hidden ${borderClass} transition-all duration-200`}>
+                    <VideoTile
+                      participant={participant}
+                      stream={participant.stream}
+                      isLocal={participant.isLocal}
+                      isSpeaking={isSpeaking}
+                    />
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>
