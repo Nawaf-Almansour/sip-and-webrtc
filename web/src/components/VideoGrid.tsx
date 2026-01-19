@@ -46,7 +46,6 @@ function VideoTile({ participant, stream, cameraStream, screenStream, isLocal, i
 
   useEffect(() => {
     if (videoRef.current && mainStream) {
-      // Only bind once per stream
       if (boundMainStreamRef.current !== mainStream.id) {
         videoRef.current.srcObject = mainStream;
         boundMainStreamRef.current = mainStream.id;
@@ -59,11 +58,10 @@ function VideoTile({ participant, stream, cameraStream, screenStream, isLocal, i
         });
       }
     }
-  }, [mainStream?.id, participant.id]);
+  }, [mainStream]);
 
   useEffect(() => {
     if (pipVideoRef.current && cameraStream && hasScreenShare) {
-      // Only bind once per stream
       if (boundPipStreamRef.current !== cameraStream.id) {
         pipVideoRef.current.srcObject = cameraStream;
         boundPipStreamRef.current = cameraStream.id;
@@ -73,7 +71,7 @@ function VideoTile({ participant, stream, cameraStream, screenStream, isLocal, i
         });
       }
     }
-  }, [cameraStream?.id, hasScreenShare, participant.id]);
+  }, [cameraStream, hasScreenShare]);
 
   const borderClass = isSpeaking ? 'border-4 border-green-500' : 'border-2 border-transparent';
 
@@ -153,47 +151,46 @@ export default function VideoGrid({
   
   const gridCols = participants.length <= 1 ? 1 : participants.length <= 4 ? 2 : 3;
 
-  // Render hidden audio elements for all remote streams in the map
-  const audioElements: JSX.Element[] = [];
+  // Render hidden audio elements for all remote streams
   const boundAudioStreamsRef = useRef<Set<string>>(new Set());
   
-  if (remoteStreams) {
-    remoteStreams.forEach((stream, participantId) => {
+  const audioElements = useMemo(() => {
+    if (!remoteStreams || remoteStreams.size === 0) return [];
+
+    return Array.from(remoteStreams.entries()).map(([participantId, stream]) => {
       const audioTracks = stream.getAudioTracks();
-      // Only create audio element if stream has audio tracks
-      if (audioTracks.length > 0) {
-        audioElements.push(
-          <audio
-            key={`audio-${participantId}`}
-            autoPlay
-            playsInline
-            ref={(audio) => {
-              if (!audio) return;
-              
-              const streamKey = `${participantId}-${stream.id}`;
-              // Only bind once per stream
-              if (!boundAudioStreamsRef.current.has(streamKey)) {
-                const audioStream = new MediaStream(audioTracks);
-                audio.srcObject = audioStream;
-                audio.muted = false;
-                boundAudioStreamsRef.current.add(streamKey);
-                
-                audio.play().catch(err => {
-                  console.log('[VideoGrid] Audio play:', participantId, err.message);
-                });
-                
-                console.log('[VideoGrid] Connected audio for:', participantId, {
-                  streamId: stream.id,
-                  audioTracks: audioTracks.length,
-                });
-              }
-            }}
-            style={{ display: 'none' }}
-          />
-        );
-      }
-    });
-  }
+      if (audioTracks.length === 0) return null;
+
+      return (
+        <audio
+          key={`audio-${participantId}-${stream.id}`}
+          autoPlay
+          playsInline
+          ref={(audio) => {
+            if (!audio) return;
+
+            const streamKey = `${participantId}-${stream.id}`;
+            if (!boundAudioStreamsRef.current.has(streamKey)) {
+              const audioStream = new MediaStream(audioTracks);
+              audio.srcObject = audioStream;
+              audio.muted = false;
+              boundAudioStreamsRef.current.add(streamKey);
+
+              audio.play().catch(err => {
+                console.log('[VideoGrid] Audio play:', participantId, err.message);
+              });
+
+              console.log('[VideoGrid] Connected audio for:', participantId, {
+                streamId: stream.id,
+                audioTracks: audioTracks.length,
+              });
+            }
+          }}
+          style={{ display: 'none' }}
+        />
+      );
+    }).filter(Boolean);
+  }, [remoteStreams]);
 
   // Log video stream availability only once per stream
   const loggedCameraStreamsRef = useRef<Set<string>>(new Set());
@@ -234,65 +231,25 @@ export default function VideoGrid({
   }, [remoteScreenStreams]);
 
   const videoParticipants = useMemo(() => {
-    const result = participants.map(p => {
+    return participants.map(p => {
       const isLocal = p.id === localParticipantId;
-      
-      if (isLocal) {
-        return {
-          ...p,
-          isLocal,
-          stream: undefined,
-          cameraStream: localCameraStream,
-          screenStream: localScreenStream,
-        };
-      }
-      
-      // For remote participants, search for streams by any available key
-      // Streams might be stored under signaling ID (guest-xxxx) not backend UUID
-      let cameraStream: MediaStream | undefined;
-      let screenStream: MediaStream | undefined;
-      let foundStreamKey: string | undefined;
-      
-      // Try to find stream by checking all keys in the map
-      for (const [key, stream] of remoteCameraStreams?.entries() || []) {
-        // Check if this key might correspond to this participant
-        // For now, we'll use a simple heuristic: if only one stream exists, use it
-        if (remoteCameraStreams?.size === 1) {
-          cameraStream = stream;
-          foundStreamKey = key;
-          break;
-        }
-      }
-      
-      for (const [key, stream] of remoteScreenStreams?.entries() || []) {
-        if (remoteScreenStreams?.size === 1) {
-          screenStream = stream;
-          break;
-        }
-      }
-      
-      console.log('[VideoGrid] Participant stream mapping:', {
-        participantId: p.id,
-        displayName: p.displayName,
-        isLocal,
-        hasCameraStream: !!cameraStream,
-        hasScreenStream: !!screenStream,
-        remoteCameraStreamsSize: remoteCameraStreams?.size,
-        remoteScreenStreamsSize: remoteScreenStreams?.size,
-        streamKeys: Array.from(remoteCameraStreams?.keys() || []),
-        cameraStreamId: cameraStream?.id,
-      });
-      
+
       return {
         ...p,
         isLocal,
         stream: undefined,
-        cameraStream,
-        screenStream,
+        cameraStream: isLocal ? localCameraStream : remoteCameraStreams?.get(p.id),
+        screenStream: isLocal ? localScreenStream : remoteScreenStreams?.get(p.id),
       };
     });
-    return result;
-  }, [participants, localParticipantId, localCameraStream, localScreenStream, remoteStreams, remoteCameraStreams, remoteScreenStreams]);
+  }, [
+    participants,
+    localParticipantId,
+    localCameraStream,
+    localScreenStream,
+    remoteCameraStreams,
+    remoteScreenStreams,
+  ]);
 
   // Presentation Mode - screen share prominent with cameras in sidebar
   if (effectiveLayout === 'presentation' && screenSharerId) {
