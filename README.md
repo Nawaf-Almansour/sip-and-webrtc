@@ -336,6 +336,62 @@ Meeting.tsx (Core orchestrator)
 - **WebSocket (WSS)**: Secure signaling channel for WebRTC P2P mode
 - **Verto Protocol**: SIP-based signaling for FreeSWITCH SFU mode
 
+### Cisco SIP Gateway Integration
+
+The system supports integration with Cisco SIP endpoints (phones, MCU, soft clients) through FreeSWITCH SIP gateway:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│              CISCO SIP GATEWAY ARCHITECTURE                     │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  CISCO ENDPOINTS          FREESWITCH SIP GATEWAY    WEBRTC      │
+│  ┌──────────────┐         ┌──────────────────┐    ┌──────────┐ │
+│  │ Cisco Phone  │         │                  │    │ Browser  │ │
+│  │ (SIP)        │◄───────►│ FreeSWITCH       │◄──►│ WebRTC   │ │
+│  └──────────────┘         │ SIP B2BUA        │    └──────────┘ │
+│                           │                  │                  │
+│  ┌──────────────┐         │ ┌──────────────┐ │    ┌──────────┐ │
+│  │ Cisco MCU    │         │ │ SIP Gateway  │ │    │ Mobile   │ │
+│  │ (SIP)        │◄───────►│ │ Config       │ │◄──►│ App      │ │
+│  └──────────────┘         │ └──────────────┘ │    └──────────┘ │
+│                           │                  │                  │
+│  ┌──────────────┐         │ ┌──────────────┐ │    ┌──────────┐ │
+│  │ Cisco Soft   │         │ │ Screen Share │ │    │ Desktop  │ │
+│  │ Client       │◄───────►│ │ Handler      │ │◄──►│ App      │ │
+│  └──────────────┘         │ └──────────────┘ │    └──────────┘ │
+│                           │                  │                  │
+│                           └──────────────────┘                  │
+│                                   │                             │
+│                                   ▼                             │
+│                           ┌──────────────────┐                 │
+│                           │  FreeSWITCH MCU  │                 │
+│                           │  (Media Mixing)  │                 │
+│                           └──────────────────┘                 │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Cisco Integration Features**:
+- ✅ **Cisco Phone Support**: IP phones register with FreeSWITCH SIP gateway
+- ✅ **Cisco MCU Support**: Connect Cisco MCU endpoints to meetings
+- ✅ **Cisco Soft Clients**: Support for Cisco Jabber and other soft clients
+- ✅ **Screen Share**: Separate SIP call for screen sharing from Cisco endpoints
+- ✅ **Participant Mapping**: Automatic mapping between SIP URIs and internal participant IDs
+- ✅ **Mixed Participants**: WebRTC clients and Cisco endpoints can interact seamlessly
+- ✅ **Codec Support**: OPUS, G729, G722, PCMU for audio; VP8, H264 for video
+
+**How It Works**:
+1. Cisco endpoint registers with FreeSWITCH SIP gateway
+2. User dials meeting room number
+3. FreeSWITCH routes call to appropriate conference
+4. Cisco participant appears in VideoGrid alongside WebRTC participants
+5. Screen share creates separate SIP call to screen conference
+6. MCU mixes all streams and sends to participants
+7. WebRTC clients receive mixed stream via Verto protocol
+
+See `CISCO_SIP_GATEWAY_PLAN.md` for detailed integration implementation guide.
+
 ## Server Requirements for Scaling
 
 ### For 50 Participants (Single MCU Server)
