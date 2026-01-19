@@ -132,18 +132,15 @@ export default function VideoGrid({
   layout = 'grid', 
   activeSpeakerId 
 }: VideoGridProps) {
-  // Auto-detect presentation mode when someone is sharing screen
-  const hasScreenShare = (localScreenStream && localScreenStream.getVideoTracks().length > 0) || 
-                         (remoteScreenStreams && remoteScreenStreams.size > 0);
-  const effectiveLayout = hasScreenShare ? 'presentation' : layout;
+  // Layout is now determined by backend, use it directly
+  const effectiveLayout = layout;
   
-  // Find who is sharing screen
+  // Find who is sharing screen (for presentation mode)
   const screenSharerId = useMemo(() => {
     if (localScreenStream && localScreenStream.getVideoTracks().length > 0) {
       return localParticipantId;
     }
     if (remoteScreenStreams && remoteScreenStreams.size > 0) {
-      // Return the first (usually only) screen sharer
       return Array.from(remoteScreenStreams.keys())[0];
     }
     return null;
