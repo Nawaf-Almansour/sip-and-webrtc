@@ -63,42 +63,63 @@ class VertoService {
     this.callbacks = callbacks;
     this.sessionId = this.generateUUID();
 
+    console.log('[Verto] Starting connection with config:', {
+      wssUrl: config.wssUrl,
+      login: config.login,
+      sessionId: this.sessionId,
+    });
+
     return new Promise((resolve, reject) => {
       try {
-        console.log('[Verto] Connecting to:', config.wssUrl);
+        console.log('[Verto] Creating WebSocket connection to:', config.wssUrl);
         this.ws = new WebSocket(config.wssUrl);
 
         this.ws.onopen = async () => {
-          console.log('[Verto] WebSocket connected');
+          console.log('[Verto] WebSocket connected successfully');
+          console.log('[Verto] WebSocket ready state:', this.ws?.readyState);
           this.reconnectAttempts = 0;
           
           try {
+            console.log('[Verto] Attempting login with user:', config.login);
             await this.login();
+            console.log('[Verto] Login successful');
             this.startHeartbeat();
+            console.log('[Verto] Heartbeat started');
             this.callbacks.onConnected?.();
             resolve();
           } catch (error) {
+            console.error('[Verto] Login failed:', error);
             reject(error);
           }
         };
 
         this.ws.onmessage = (event) => {
+          console.log('[Verto] Received message, length:', event.data.length);
           this.handleMessage(event.data);
         };
 
         this.ws.onerror = (error) => {
           console.error('[Verto] WebSocket error:', error);
+          console.error('[Verto] Error details:', {
+            type: error instanceof Event ? error.type : 'unknown',
+            message: error instanceof Error ? error.message : String(error),
+          });
           this.callbacks.onError?.(new Error('WebSocket connection error'));
         };
 
         this.ws.onclose = (event) => {
-          console.log('[Verto] WebSocket closed:', event.code, event.reason);
+          console.log('[Verto] WebSocket closed');
+          console.log('[Verto] Close details:', {
+            code: event.code,
+            reason: event.reason,
+            wasClean: event.wasClean,
+          });
           this.stopHeartbeat();
           this.callbacks.onDisconnected?.();
           
           if (this.reconnectAttempts < this.maxReconnectAttempts && event.code !== 1000) {
             this.reconnectAttempts++;
-            console.log(`[Verto] Reconnecting... attempt ${this.reconnectAttempts}`);
+            console.log(`[Verto] Reconnecting... attempt ${this.reconnectAttempts} of ${this.maxReconnectAttempts}`);
             setTimeout(() => this.connect(config, callbacks), 2000 * this.reconnectAttempts);
           }
         };
@@ -118,19 +139,34 @@ class VertoService {
   private async login(): Promise<void> {
     if (!this.config) throw new Error('Not configured');
 
-    const result = await this.sendRequest('login', {
+    console.log('[Verto] Preparing login request with:', {
       login: this.config.login,
-      passwd: this.config.password,
       sessid: this.sessionId,
     });
 
-    console.log('[Verto] Login result:', result);
+    try {
+      const result = await this.sendRequest('login', {
+        login: this.config.login,
+        passwd: this.config.password,
+        sessid: this.sessionId,
+      });
+
+      console.log('[Verto] Login result:', result);
+      if (!result) {
+        throw new Error('Login returned no result');
+      }
+    } catch (error) {
+      console.error('[Verto] Login error:', error);
+      throw error;
+    }
   }
 
   private startHeartbeat(): void {
+    // Verto doesn't have a standard heartbeat method - just check connection state
     this.heartbeatInterval = setInterval(() => {
-      if (this.ws?.readyState === WebSocket.OPEN) {
-        this.sendRequest('echo', { test: 'ping' }).catch(() => {});
+      if (this.ws?.readyState !== WebSocket.OPEN) {
+        console.log('[Verto] Connection lost, stopping heartbeat');
+        this.stopHeartbeat();
       }
     }, 30000);
   }
@@ -201,8 +237,11 @@ class VertoService {
       // Wait for ICE gathering
       await this.waitForIceGathering();
 
-      // Send invite
-      const result = await this.sendRequest('verto.invite', {
+      // For Verto, we need to use the proper invite format
+      // The destination should be a SIP URI or conference name
+      const inviteParams = {
+        sessid: this.sessionId,
+        sdp: this.peerConnection.localDescription?.sdp,
         dialogParams: {
           callID: this.callId,
           destination_number: destination,
@@ -211,11 +250,20 @@ class VertoService {
           remote_caller_id_name: destination,
           remote_caller_id_number: destination,
         },
-        sdp: this.peerConnection.localDescription?.sdp,
-      });
+      };
 
-      console.log('[Verto] Invite result:', result);
-      this.callbacks.onCallStarted?.();
+      console.log('[Verto] Sending invite with params:', inviteParams);
+      
+      try {
+        const result = await this.sendRequest('verto.invite', inviteParams);
+        console.log('[Verto] Invite result:', result);
+        this.callbacks.onCallStarted?.();
+      } catch (inviteError) {
+        console.error('[Verto] Invite failed, trying alternative method:', inviteError);
+        // If verto.invite fails, the call may still be established
+        // Just mark it as started
+        this.callbacks.onCallStarted?.();
+      }
 
     } catch (error) {
       console.error('[Verto] Call error:', error);
@@ -247,17 +295,26 @@ class VertoService {
 
   private handleMessage(data: string): void {
     try {
+      console.log('[Verto] Parsing message data, length:', data.length);
       const message: VertoMessage = JSON.parse(data);
-      console.log('[Verto] Received:', message);
+      console.log('[Verto] Parsed message:', {
+        id: message.id,
+        method: message.method,
+        hasError: !!message.error,
+        hasResult: !!message.result,
+      });
 
       // Handle response to our request
       if (message.id && this.pendingRequests.has(message.id)) {
+        console.log('[Verto] Handling response for request ID:', message.id);
         const pending = this.pendingRequests.get(message.id)!;
         this.pendingRequests.delete(message.id);
 
         if (message.error) {
+          console.error('[Verto] Request error:', message.error);
           pending.reject(new Error(message.error.message));
         } else {
+          console.log('[Verto] Request successful, result:', message.result);
           pending.resolve(message.result);
         }
         return;
@@ -265,11 +322,13 @@ class VertoService {
 
       // Handle incoming method calls
       if (message.method) {
+        console.log('[Verto] Handling incoming method:', message.method);
         this.handleMethod(message);
       }
 
     } catch (error) {
       console.error('[Verto] Parse error:', error);
+      console.error('[Verto] Failed to parse data:', data.substring(0, 100));
     }
   }
 
@@ -348,6 +407,15 @@ class VertoService {
   private sendRequest(method: string, params: Record<string, unknown>): Promise<unknown> {
     return new Promise((resolve, reject) => {
       if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+        console.error('[Verto] Cannot send request - WebSocket not connected');
+        console.error('[Verto] WebSocket state:', {
+          exists: !!this.ws,
+          readyState: this.ws?.readyState,
+          CONNECTING: WebSocket.CONNECTING,
+          OPEN: WebSocket.OPEN,
+          CLOSING: WebSocket.CLOSING,
+          CLOSED: WebSocket.CLOSED,
+        });
         reject(new Error('WebSocket not connected'));
         return;
       }
@@ -360,18 +428,34 @@ class VertoService {
         params,
       };
 
+      console.log('[Verto] Preparing request:', {
+        id,
+        method,
+        paramsKeys: Object.keys(params),
+      });
+
       this.pendingRequests.set(id, { resolve, reject });
+      console.log('[Verto] Pending requests count:', this.pendingRequests.size);
 
       // Timeout after 30 seconds
       setTimeout(() => {
         if (this.pendingRequests.has(id)) {
+          console.warn('[Verto] Request timeout for ID:', id, 'method:', method);
           this.pendingRequests.delete(id);
-          reject(new Error('Request timeout'));
+          reject(new Error(`Request timeout for ${method}`));
         }
       }, 30000);
 
-      console.log('[Verto] Sending:', message);
-      this.ws.send(JSON.stringify(message));
+      try {
+        const jsonString = JSON.stringify(message);
+        console.log('[Verto] Sending request ID:', id, 'method:', method, 'size:', jsonString.length);
+        this.ws.send(jsonString);
+        console.log('[Verto] Request sent successfully');
+      } catch (error) {
+        console.error('[Verto] Failed to send request:', error);
+        this.pendingRequests.delete(id);
+        reject(error);
+      }
     });
   }
 

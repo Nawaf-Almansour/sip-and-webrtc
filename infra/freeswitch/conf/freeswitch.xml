@@ -18,7 +18,24 @@
       <groups>
         <group name="default">
           <users>
-            <!-- Dynamic users will be created via ESL -->
+            <!-- Admin user for Verto -->
+            <user id="admin">
+              <params>
+                <param name="password" value="admin"/>
+              </params>
+              <variables>
+                <variable name="user_context" value="default"/>
+              </variables>
+            </user>
+            <!-- Test user -->
+            <user id="1001">
+              <params>
+                <param name="password" value="1234"/>
+              </params>
+              <variables>
+                <variable name="user_context" value="default"/>
+              </variables>
+            </user>
           </users>
         </group>
       </groups>

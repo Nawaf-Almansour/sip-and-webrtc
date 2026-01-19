@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { query } from '../../store/db.js';
-import { createJoinToken } from '../../services/tokenService.js';
+import { createJoinToken, createWebSocketToken } from '../../services/tokenService.js';
 import { config } from '../../config/index.js';
 
 const router = Router();
@@ -79,6 +79,22 @@ router.post('/:id/join', async (req, res) => {
     }
 
     const token = await createJoinToken('meeting', id, role);
+    
+    // Create WebSocket JWT token for signaling server authentication
+    const wsToken = createWebSocketToken({
+      participantId,
+      meetingId: id,
+      displayName,
+      role,
+    });
+
+    console.log('[API] Generated tokens:', {
+      participantId,
+      meetingId: id,
+      displayName,
+      wsToken: wsToken.substring(0, 20) + '...',
+      wsTokenLength: wsToken.length,
+    });
 
     res.json({
       participantId,
@@ -87,6 +103,7 @@ router.post('/:id/join', async (req, res) => {
       waitingRoomEnabled: meeting.waiting_room_enabled,
       sipUri: `sip:room-${id}@${config.sip.domain}`,
       joinToken: token,
+      wsToken, // JWT token for WebSocket signaling
       wssUrl: config.sip.wssUrl,
       turnConfig: {
         urls: [config.turn.url, config.stun.url],

@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8"?>
+<configuration name="verto.conf" description="Verto WebRTC Configuration">
+  <settings>
+    <param name="debug" value="10"/>
+    <param name="enable-presence" value="false"/>
+  </settings>
+  
+  <profiles>
+    <profile name="default">
+      <!-- Bind to all interfaces on port 8443 with WSS (TLS) -->
+      <param name="bind-local" value="0.0.0.0:8443" secure="true"/>
+      
+      <!-- TLS/SSL Configuration - certs are in /etc/freeswitch/certs/ -->
+      <param name="secure-combined" value="/etc/freeswitch/certs/wss.pem"/>
+      <param name="secure-chain" value="/etc/freeswitch/certs/wss.pem"/>
+      
+      <!-- Force registration to this domain -->
+      <param name="force-register-domain" value="$${domain}"/>
+      
+      <!-- Authentication - blind-reg=false requires valid user credentials -->
+      <param name="userauth" value="true"/>
+      <param name="blind-reg" value="false"/>
+      
+      <!-- RTP Settings -->
+      <param name="rtp-ip" value="$${local_ip_v4}"/>
+      <param name="ext-rtp-ip" value="auto-nat"/>
+      
+      <!-- ICE/STUN/TURN -->
+      <param name="local-network" value="localnet.auto"/>
+      <param name="apply-candidate-acl" value="rfc1918.auto"/>
+      
+      <!-- Timer -->
+      <param name="timer-name" value="soft"/>
+      
+      <!-- Inbound codec preferences -->
+      <param name="inbound-codec-string" value="opus,vp8,h264"/>
+      <param name="outbound-codec-string" value="opus,vp8,h264"/>
+      
+      <!-- Context for calls -->
+      <param name="context" value="default"/>
+      
+      <!-- Enable Verto API methods -->
+      <param name="enable-verto" value="true"/>
+      <param name="verto-methods" value="verto.invite,verto.answer,verto.bye,verto.attach,verto.info,verto.display,verto.media,verto.modify"/>
+      
+      <!-- Allowed methods -->
+      <param name="mcast" value="true"/>
+    </profile>
+  </profiles>
+</configuration>

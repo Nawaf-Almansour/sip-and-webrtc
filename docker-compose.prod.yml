@@ -46,7 +46,7 @@ services:
     restart: unless-stopped
 
   freeswitch:
-    image: drachtio/drachtio-freeswitch-mrf:latest
+    image: safarov/freeswitch:latest
     ports:
       - "5060:5060/udp"
       - "5060:5060/tcp"

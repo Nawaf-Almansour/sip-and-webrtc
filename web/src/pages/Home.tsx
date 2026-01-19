@@ -109,7 +109,7 @@ export default function Home() {
                   />
                   <div className="flex-1">
                     <div className="text-white font-medium">WebRTC P2P</div>
-                    <div className="text-gray-400 text-xs">Direct connection • Best for 2-4 participants</div>
+                    <div className="text-gray-400 text-xs">Direct peer-to-peer • Recommended</div>
                   </div>
                 </label>
                 <label className="flex items-center p-3 bg-gray-700 rounded-lg cursor-pointer hover:bg-gray-600 transition">
@@ -122,8 +122,8 @@ export default function Home() {
                     className="mr-3"
                   />
                   <div className="flex-1">
-                    <div className="text-white font-medium">SIP/Verto</div>
-                    <div className="text-gray-400 text-xs">Server-based • Best for 5+ participants</div>
+                    <div className="text-white font-medium">Verto (Experimental)</div>
+                    <div className="text-gray-400 text-xs">FreeSWITCH WebSocket • Limited support</div>
                   </div>
                 </label>
               </div>

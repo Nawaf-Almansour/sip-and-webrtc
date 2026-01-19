@@ -1,0 +1,14 @@
+{
+  "name": "verto-mcu-tests",
+  "version": "1.0.0",
+  "description": "Security and functional tests for Verto MCU Server",
+  "scripts": {
+    "test": "node test-verto-connection.js && node test-verto-invalid-login.js && node test-ws-signaling.js",
+    "test:verto": "node test-verto-connection.js",
+    "test:auth": "node test-verto-invalid-login.js",
+    "test:ws": "node test-ws-signaling.js"
+  },
+  "dependencies": {
+    "ws": "^8.14.0"
+  }
+}

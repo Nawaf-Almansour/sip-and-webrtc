@@ -107,7 +107,7 @@ export default function JoinMeeting() {
               }`}
             >
               <div className="font-semibold">WebRTC P2P</div>
-              <div className="text-xs mt-1 opacity-75">Direct peer-to-peer connection • Best for 2-4 participants</div>
+              <div className="text-xs mt-1 opacity-75">Direct peer-to-peer • Recommended</div>
             </button>
             <button
               type="button"
@@ -118,8 +118,8 @@ export default function JoinMeeting() {
                   : 'border-gray-600 bg-gray-700 text-gray-400 hover:border-gray-500'
               }`}
             >
-              <div className="font-semibold">SIP/Verto</div>
-              <div className="text-xs mt-1 opacity-75">Server-based connection • Best for 5+ participants</div>
+              <div className="font-semibold">Verto (Experimental)</div>
+              <div className="text-xs mt-1 opacity-75">FreeSWITCH WebSocket • Limited support</div>
             </button>
           </div>
         </div>

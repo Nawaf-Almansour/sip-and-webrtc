@@ -43,7 +43,7 @@
 - drachtio-srf for SIP routing
 - FreeSWITCH MCU for media mixing
 
-### Codecs & Protocols
+### Codecs & Protocols 
 
 - Audio: Opus (48kHz)
 - Video: VP8 (primary), VP9 (fallback)

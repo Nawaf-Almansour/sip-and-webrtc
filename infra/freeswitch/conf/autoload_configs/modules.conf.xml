@@ -20,6 +20,7 @@
     
     <!-- Endpoints -->
     <load module="mod_sofia"/>
+    <load module="mod_verto"/>
     
     <!-- File Formats -->
     <load module="mod_sndfile"/>

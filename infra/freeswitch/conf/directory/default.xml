@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<include>
+  <domain name="$${domain}">
+    <params>
+      <param name="dial-string" value="{presence_id=${dialed_user}@${dialed_domain}}${sofia_contact(${dialed_user}@${dialed_domain})}"/>
+    </params>
+    
+    <groups>
+      <group name="default">
+        <users>
+          <!-- Default admin user for Verto -->
+          <user id="admin">
+            <params>
+              <param name="password" value="admin"/>
+              <param name="vm-password" value="admin"/>
+              <param name="jsonrpc-allowed-methods" value="*"/>
+              <param name="jsonrpc-allowed-event-channels" value="demo,conference,presence"/>
+            </params>
+            <variables>
+              <variable name="toll_allow" value="domestic,international,local"/>
+              <variable name="accountcode" value="admin"/>
+              <variable name="user_context" value="default"/>
+              <variable name="effective_caller_id_name" value="Admin"/>
+              <variable name="effective_caller_id_number" value="1000"/>
+            </variables>
+          </user>
+          
+          <!-- Test user -->
+          <user id="1001">
+            <params>
+              <param name="password" value="1234"/>
+            </params>
+            <variables>
+              <variable name="toll_allow" value="domestic,international,local"/>
+              <variable name="accountcode" value="1001"/>
+              <variable name="user_context" value="default"/>
+              <variable name="effective_caller_id_name" value="User 1001"/>
+              <variable name="effective_caller_id_number" value="1001"/>
+            </variables>
+          </user>
+        </users>
+      </group>
+    </groups>
+  </domain>
+</include>
