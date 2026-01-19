@@ -236,6 +236,37 @@ FreeSWITCH SFU Mode (5+ participants):
 └─────────────────────────────────────────────┘
 ```
 
+### Track Management & Metadata
+
+Professional engineering approach for track lifecycle management:
+
+**TrackMetadata Interface**:
+```typescript
+interface TrackMetadata {
+  participantId: string;      // Which participant owns the track
+  type: 'camera'|'screen'|'audio';  // Track type
+  mode: 'p2p'|'mcu';          // Connection mode (P2P or MCU)
+  mid?: string;               // Media ID for transceiver identification
+  timestamp: number;          // When track was created
+}
+```
+
+**Track Management Features**:
+- ✅ **Metadata Attachment**: Every track carries complete context
+- ✅ **Lifecycle Tracking**: Metadata stored in `trackMetadataMap`
+- ✅ **Type Identification**: Clear track type (camera/screen/audio)
+- ✅ **Mode Awareness**: Tracks know if they're in P2P or MCU mode
+- ✅ **MID Mapping**: Media ID for reliable transceiver identification
+- ✅ **Event Logging**: All track events include metadata context
+- ✅ **Cleanup**: Metadata removed when tracks end
+
+**Benefits**:
+- Better debugging and monitoring of track lifecycle
+- Clear identification of track ownership and type
+- Support for both P2P and MCU connection modes
+- Improved logging with complete track context
+- Foundation for advanced features (analytics, quality monitoring)
+
 ### Component Integration
 
 ```
