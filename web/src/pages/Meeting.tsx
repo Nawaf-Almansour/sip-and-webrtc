@@ -84,6 +84,28 @@ export default function Meeting() {
   const webrtcConnectedRef = useRef(false);
   const isHost = role === 'host';
 
+  // Listen for layout updates from backend
+  useEffect(() => {
+    const handleLayoutUpdate = (message: any) => {
+      if (message.type === 'layout-update') {
+        console.log('[Meeting] Received layout update from backend:', {
+          layout: message.layout,
+          reason: message.reason,
+          participantCount: message.participantCount,
+          screenSharerId: message.screenSharerId,
+        });
+        setLayout(message.layout);
+      }
+    };
+
+    // Subscribe to layout updates
+    mediaService.on('layout-update', handleLayoutUpdate);
+
+    return () => {
+      mediaService.off('layout-update', handleLayoutUpdate);
+    };
+  }, []);
+
   const addNotification = (message: string, type: 'join' | 'leave') => {
     const id = Date.now().toString();
     setNotifications(prev => [...prev, { id, message, type }]);

@@ -21,16 +21,18 @@ export interface MediaServiceConfig {
   participantId: string;
   displayName: string;
   localStream: MediaStream;
-  vertoConfig?: VertoConfig;
+  vertoConfig: VertoConfig;
   turnConfig?: { urls: string | string[]; username?: string; credential?: string };
+  wsToken?: string;
   callbacks: MediaServiceCallbacks;
 }
 
 class MediaService {
-  private mode: ConnectionMode = 'webrtc';
+  private mode: ConnectionMode = 'verto';
   private connected = false;
   private localStream: MediaStream | null = null;
   private config: MediaServiceConfig | null = null;
+  private eventListeners = new Map<string, Set<(message: any) => void>>();
 
   async connect(config: MediaServiceConfig): Promise<void> {
     this.mode = config.mode;
@@ -38,10 +40,9 @@ class MediaService {
     this.config = config;
 
     console.log(`[MediaService] Connecting via ${this.mode.toUpperCase()} mode`);
-    console.log(`[MediaService] Using unified WebRTC P2P signaling for all participants`);
 
-    // Always use WebRTC P2P signaling for participant communication
-    // This allows WebRTC and Verto mode users to communicate with each other
+    // Use WebRTC P2P signaling for all participants
+    // This is the most reliable approach since Verto JSON-RPC commands are not fully supported
     await this.connectWebRTC(config);
 
     this.connected = true;
@@ -49,7 +50,7 @@ class MediaService {
   }
 
   private async connectWebRTC(config: MediaServiceConfig): Promise<void> {
-    console.log('[MediaService] Using WebRTC P2P mode');
+    console.log('[MediaService] Using WebRTC P2P signaling');
     
     // Build ICE servers array
     const iceServers: RTCIceServer[] = [
@@ -94,106 +95,39 @@ class MediaService {
           config.callbacks.onChatMessage?.(from, displayName, message, typeof timestamp === 'string' ? parseInt(timestamp) : timestamp);
         },
       },
-      iceServers
+      iceServers,
+      config.wsToken
     );
   }
 
-  private async connectVerto(config: MediaServiceConfig): Promise<void> {
-    if (!config.vertoConfig) {
-      throw new Error('Verto config required for Verto mode');
-    }
-
-    console.log('[MediaService] Using Verto/FreeSWITCH mode');
-    console.log('[MediaService] WSS URL:', config.vertoConfig.wssUrl);
-
-    await vertoService.connect(config.vertoConfig, {
-      onConnected: () => {
-        console.log('[MediaService] Verto connected');
-      },
-      onDisconnected: () => {
-        console.log('[MediaService] Verto disconnected');
-        this.connected = false;
-        config.callbacks.onDisconnected?.();
-      },
-      onCallStarted: () => {
-        console.log('[MediaService] Verto call started');
-      },
-      onCallEnded: () => {
-        console.log('[MediaService] Verto call ended');
-        config.callbacks.onDisconnected?.();
-      },
-      onRemoteStream: (stream) => {
-        console.log('[MediaService] Received remote stream via Verto');
-        config.callbacks.onRemoteStream?.('verto-remote', stream);
-      },
-      onLocalStream: (stream) => {
-        console.log('[MediaService] Local stream set via Verto');
-        this.localStream = stream;
-      },
-      onError: (error) => {
-        console.error('[MediaService] Verto error:', error);
-        config.callbacks.onError?.(error);
-      },
-    });
-
-    // Make Verto call to the meeting room (conference)
-    try {
-      const destination = `conference-${config.meetingId}`;
-      await vertoService.call(destination, config.localStream);
-      console.log('[MediaService] Verto call initiated to:', destination);
-    } catch (error) {
-      console.error('[MediaService] Failed to make Verto call:', error);
-      config.callbacks.onError?.(error as Error);
-    }
-  }
-
   async disconnect(): Promise<void> {
-    console.log(`[MediaService] Disconnecting from ${this.mode} mode`);
-    
-    if (this.mode === 'verto') {
-      await vertoService.disconnect();
-    } else {
-      webrtcService.disconnect();
-    }
-    
+    console.log('[MediaService] Disconnecting');
+    webrtcService.disconnect();
     this.connected = false;
     this.config = null;
   }
 
   async mute(muted: boolean): Promise<void> {
     console.log(`[MediaService] Setting mute: ${muted}`);
-    
-    if (this.mode === 'verto') {
-      await vertoService.mute(muted);
-    } else {
-      if (this.localStream) {
-        this.localStream.getAudioTracks().forEach(track => {
-          track.enabled = !muted;
-        });
-      }
+    if (this.localStream) {
+      this.localStream.getAudioTracks().forEach(track => {
+        track.enabled = !muted;
+      });
     }
   }
 
   async setVideoEnabled(enabled: boolean): Promise<void> {
     console.log(`[MediaService] Setting video enabled: ${enabled}`);
-    
-    if (this.mode === 'verto') {
-      await vertoService.setVideoEnabled(enabled);
-    } else {
-      if (this.localStream) {
-        this.localStream.getVideoTracks().forEach(track => {
-          track.enabled = enabled;
-        });
-      }
+    if (this.localStream) {
+      this.localStream.getVideoTracks().forEach(track => {
+        track.enabled = enabled;
+      });
     }
   }
 
   sendChatMessage(message: string): void {
-    if (this.mode === 'webrtc') {
-      webrtcService.sendChatMessage(message);
-    } else {
-      console.warn('[MediaService] Chat not supported in Verto mode yet');
-    }
+    console.log('[MediaService] Sending chat message:', message);
+    webrtcService.sendChatMessage(message);
   }
 
   getMode(): ConnectionMode {
@@ -205,67 +139,70 @@ class MediaService {
   }
 
   getLocalStream(): MediaStream | null {
-    if (this.mode === 'verto') {
-      return vertoService.getLocalStream();
-    }
     return this.localStream;
   }
 
   getPeerConnection(): RTCPeerConnection | null {
-    if (this.mode === 'webrtc') {
-      return webrtcService.getFirstPeerConnection();
-    }
-    return null;
+    return webrtcService.getFirstPeerConnection();
   }
 
   async setCameraTrack(track: MediaStreamTrack | null): Promise<void> {
-    if (this.mode === 'webrtc') {
-      await webrtcService.setCameraTrack(track);
-    }
-    // Verto mode: Camera is part of main conference, no separate track management needed
+    console.log('[MediaService] setCameraTrack');
+    await webrtcService.setCameraTrack(track);
   }
 
   async setScreenTrack(track: MediaStreamTrack | null): Promise<void> {
-    console.log('[MediaService] setScreenTrack called, mode:', this.mode, 'track:', track ? 'active' : 'null');
-    
-    // Always use WebRTC for screen track in P2P signaling
-    // Even in "verto" mode, we use WebRTC P2P for participant communication
+    console.log('[MediaService] setScreenTrack called, track:', track ? 'active' : 'null');
     await webrtcService.setScreenTrack(track);
-    
-    // Additionally, if in verto mode and connected to FreeSWITCH, also share via Verto
-    if (this.mode === 'verto' && vertoService.isConnected()) {
-      try {
-        if (track && this.config) {
-          const screenStream = new MediaStream([track]);
-          await vertoService.startScreenShare(this.config.meetingId, screenStream);
-        } else {
-          await vertoService.stopScreenShare();
-        }
-      } catch (err) {
-        console.warn('[MediaService] Verto screen share failed (non-critical):', err);
-      }
-    }
   }
 
-  // Phase 2: Join main conference for Verto mode
   async joinMainConference(meetingId: string, localStream: MediaStream): Promise<void> {
-    if (this.mode === 'verto') {
-      await vertoService.joinMainConference(meetingId, localStream);
-    }
+    // Not needed for WebRTC P2P mode
+    console.log('[MediaService] joinMainConference - not needed for P2P mode');
   }
 
-  // Phase 2: Subscribe to screen room for Verto mode
   async subscribeToScreenRoom(meetingId: string): Promise<void> {
-    if (this.mode === 'verto') {
-      await vertoService.subscribeToScreenRoom(meetingId);
-    }
+    // Not needed for WebRTC P2P mode
+    console.log('[MediaService] subscribeToScreenRoom - not needed for P2P mode');
   }
 
   async replaceVideoTrack(newTrack: MediaStreamTrack): Promise<void> {
-    if (this.mode === 'webrtc') {
-      await webrtcService.replaceVideoTrack(newTrack);
-    } else if (this.mode === 'verto') {
-      await vertoService.replaceVideoTrack(newTrack);
+    await webrtcService.replaceVideoTrack(newTrack);
+  }
+
+  /**
+   * Register event listener for messages from backend
+   */
+  on(eventType: string, callback: (message: any) => void): void {
+    if (!this.eventListeners.has(eventType)) {
+      this.eventListeners.set(eventType, new Set());
+    }
+    this.eventListeners.get(eventType)!.add(callback);
+  }
+
+  /**
+   * Unregister event listener
+   */
+  off(eventType: string, callback: (message: any) => void): void {
+    const listeners = this.eventListeners.get(eventType);
+    if (listeners) {
+      listeners.delete(callback);
+    }
+  }
+
+  /**
+   * Emit event to all registered listeners
+   */
+  emit(eventType: string, message: any): void {
+    const listeners = this.eventListeners.get(eventType);
+    if (listeners) {
+      listeners.forEach(callback => {
+        try {
+          callback(message);
+        } catch (error) {
+          console.error(`[MediaService] Error in ${eventType} listener:`, error);
+        }
+      });
     }
   }
 }
