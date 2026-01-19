@@ -45,33 +45,59 @@ function VideoTile({ participant, stream, cameraStream, screenStream, isLocal, i
   const hasScreenShare = !!screenStream;
 
   useEffect(() => {
-    if (videoRef.current && mainStream) {
+    if (!videoRef.current) return;
+    
+    if (mainStream) {
       if (boundMainStreamRef.current !== mainStream.id) {
-        videoRef.current.srcObject = mainStream;
-        boundMainStreamRef.current = mainStream.id;
-        const videoTracks = mainStream.getVideoTracks();
-        console.log('[VideoTile] Connected main video stream:', {
-          participantId: participant.id,
-          displayName: participant.displayName,
-          streamId: mainStream.id,
-          videoTracks: videoTracks.length,
-        });
+        try {
+          videoRef.current.srcObject = mainStream;
+          boundMainStreamRef.current = mainStream.id;
+          const videoTracks = mainStream.getVideoTracks();
+          console.log('[VideoTile] Connected main video stream:', {
+            participantId: participant.id,
+            displayName: participant.displayName,
+            streamId: mainStream.id,
+            videoTracks: videoTracks.length,
+            audioTracks: mainStream.getAudioTracks().length,
+          });
+        } catch (error) {
+          console.error('[VideoTile] Error binding main stream:', error);
+        }
+      }
+    } else {
+      // Clear stream if no mainStream
+      if (videoRef.current.srcObject !== null) {
+        videoRef.current.srcObject = null;
+        boundMainStreamRef.current = null;
       }
     }
-  }, [mainStream]);
+  }, [mainStream, participant.id]);
 
   useEffect(() => {
-    if (pipVideoRef.current && cameraStream && hasScreenShare) {
+    if (!pipVideoRef.current) return;
+    
+    if (cameraStream && hasScreenShare) {
       if (boundPipStreamRef.current !== cameraStream.id) {
-        pipVideoRef.current.srcObject = cameraStream;
-        boundPipStreamRef.current = cameraStream.id;
-        console.log('[VideoTile] Connected PiP camera stream:', {
-          participantId: participant.id,
-          streamId: cameraStream.id,
-        });
+        try {
+          pipVideoRef.current.srcObject = cameraStream;
+          boundPipStreamRef.current = cameraStream.id;
+          console.log('[VideoTile] Connected PiP camera stream:', {
+            participantId: participant.id,
+            streamId: cameraStream.id,
+            videoTracks: cameraStream.getVideoTracks().length,
+          });
+        } catch (error) {
+          console.error('[VideoTile] Error binding PiP stream:', error);
+        }
+      }
+    } else {
+      // Clear PiP stream if conditions not met
+      if (pipVideoRef.current.srcObject !== null) {
+        pipVideoRef.current.srcObject = null;
+        boundPipStreamRef.current = null;
       }
     }
-  }, [cameraStream, hasScreenShare]);
+  }, [cameraStream, hasScreenShare, participant.id]);
 
   const borderClass = isSpeaking ? 'border-4 border-green-500' : 'border-2 border-transparent';
 
