@@ -88,11 +88,13 @@ export default function Meeting() {
   useEffect(() => {
     const handleLayoutUpdate = (message: any) => {
       if (message.type === 'layout-update') {
-        console.log('[Meeting] Received layout update from backend:', {
+        console.log('[Meeting] 📐 Received layout update from backend:', {
           layout: message.layout,
           reason: message.reason,
           participantCount: message.participantCount,
           screenSharerId: message.screenSharerId,
+          activeSpeakerId: message.activeSpeakerId,
+          timestamp: new Date(message.timestamp).toLocaleTimeString(),
         });
         setLayout(message.layout);
       }

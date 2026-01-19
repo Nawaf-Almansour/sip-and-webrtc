@@ -37,6 +37,17 @@ export class LayoutService {
     let layout: LayoutType;
     let reason: string;
 
+    // Debug: Log state for debugging
+    console.log('[LayoutService] Determining layout for meeting:', {
+      meetingId: state.meetingId,
+      participantCount: state.participantCount,
+      screenShareActive: state.screenShareActive,
+      screenSharerId: state.screenSharerId,
+      activeSpeakerId: state.activeSpeakerId,
+      connectionMode: state.connectionMode,
+      participants: state.participants.map(p => ({ id: p.id, displayName: p.displayName })),
+    });
+
     // Rule 1: Screen share takes priority
     if (state.screenShareActive) {
       layout = 'presentation';
@@ -77,6 +88,15 @@ export class LayoutService {
     // Only add to history if layout changed
     if (!cached || cached.layout !== layout) {
       history.push(decision);
+      
+      // Debug: Log layout change
+      console.log('[LayoutService] Layout changed:', {
+        meetingId: state.meetingId,
+        oldLayout: cached?.layout,
+        newLayout: layout,
+        reason,
+        timestamp: decision.timestamp,
+      });
       
       // Keep history size manageable (last 100 entries)
       if (history.length > 100) {

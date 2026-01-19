@@ -228,17 +228,46 @@ export default function VideoGrid({
   }, [remoteScreenStreams]);
 
   const videoParticipants = useMemo(() => {
-    return participants.map(p => {
+    const result = participants.map(p => {
       const isLocal = p.id === localParticipantId;
+      const cameraStream = isLocal ? localCameraStream : remoteCameraStreams?.get(p.id);
+      const screenStream = isLocal ? localScreenStream : remoteScreenStreams?.get(p.id);
+
+      // Debug: Log stream availability for each participant
+      if (cameraStream || screenStream) {
+        console.log('[VideoGrid] Participant streams:', {
+          participantId: p.id,
+          displayName: p.displayName,
+          isLocal,
+          hasCameraStream: !!cameraStream,
+          cameraStreamId: cameraStream?.id,
+          hasScreenStream: !!screenStream,
+          screenStreamId: screenStream?.id,
+          cameraVideoTracks: cameraStream?.getVideoTracks().length || 0,
+          screenVideoTracks: screenStream?.getVideoTracks().length || 0,
+        });
+      }
 
       return {
         ...p,
         isLocal,
         stream: undefined,
-        cameraStream: isLocal ? localCameraStream : remoteCameraStreams?.get(p.id),
-        screenStream: isLocal ? localScreenStream : remoteScreenStreams?.get(p.id),
+        cameraStream,
+        screenStream,
       };
     });
+
+    // Debug: Log overall stream map status
+    console.log('[VideoGrid] Stream maps status:', {
+      totalParticipants: participants.length,
+      remoteCameraStreamsSize: remoteCameraStreams?.size || 0,
+      remoteScreenStreamsSize: remoteScreenStreams?.size || 0,
+      remoteCameraStreamKeys: Array.from(remoteCameraStreams?.keys() || []),
+      remoteScreenStreamKeys: Array.from(remoteScreenStreams?.keys() || []),
+      participantIds: participants.map(p => p.id),
+    });
+
+    return result;
   }, [
     participants,
     localParticipantId,

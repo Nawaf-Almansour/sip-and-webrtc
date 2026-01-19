@@ -161,8 +161,21 @@ export class LayoutBroadcastService {
     meetingId: string,
     participantId: string
   ): void {
+    console.log('[LayoutBroadcast] 📺 Screen share started:', {
+      meetingId,
+      participantId,
+      timestamp: Date.now(),
+    });
+
     // Update meeting state
-    meetingStateService.setScreenShareStatus(meetingId, true, participantId);
+    const state = meetingStateService.setScreenShareStatus(meetingId, true, participantId);
+
+    console.log('[LayoutBroadcast] Meeting state after screen share start:', {
+      meetingId,
+      screenShareActive: state.screenShareActive,
+      screenSharerId: state.screenSharerId,
+      participantCount: state.participantCount,
+    });
 
     // Broadcast layout update
     this.broadcastLayoutUpdate(meetingId, 'screen-share-started');
@@ -172,8 +185,20 @@ export class LayoutBroadcastService {
    * Notify about screen share stopped
    */
   notifyScreenShareStopped(meetingId: string): void {
+    console.log('[LayoutBroadcast] 📺 Screen share stopped:', {
+      meetingId,
+      timestamp: Date.now(),
+    });
+
     // Update meeting state
-    meetingStateService.setScreenShareStatus(meetingId, false);
+    const state = meetingStateService.setScreenShareStatus(meetingId, false);
+
+    console.log('[LayoutBroadcast] Meeting state after screen share stop:', {
+      meetingId,
+      screenShareActive: state.screenShareActive,
+      screenSharerId: state.screenSharerId,
+      participantCount: state.participantCount,
+    });
 
     // Broadcast layout update
     this.broadcastLayoutUpdate(meetingId, 'screen-share-stopped');
