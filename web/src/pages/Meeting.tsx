@@ -3,7 +3,7 @@ import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
 import { Mic, MicOff, Video, VideoOff, Monitor, Link2, PhoneOff, Users, Settings, MessageSquare, Grid3x3, Maximize, PanelRight, X } from 'lucide-react';
 import VideoGrid, { LayoutType } from '../components/VideoGrid';
 import MeetingQuality from '../components/MeetingQuality';
-import { mediaService, ConnectionMode } from '../services/mediaService';
+import { mediaService } from '../services/mediaService';
 import { useSpeakerDetection } from '../hooks/useSpeakerDetection';
 
 interface JoinData {
@@ -37,7 +37,7 @@ export default function Meeting() {
   const navigate = useNavigate();
   const displayName = searchParams.get('name') || 'Guest';
   const role = searchParams.get('role') || 'participant';
-  const connectionMode = (searchParams.get('mode') as ConnectionMode) || 'webrtc';
+  const connectionMode = (searchParams.get('mode') as 'webrtc' | 'verto') || 'webrtc';
 
   const [joinData, setJoinData] = useState<JoinData | null>(null);
   const [connected, setConnected] = useState(false);
@@ -46,6 +46,22 @@ export default function Meeting() {
   const [remoteStreams, setRemoteStreams] = useState<Map<string, MediaStream>>(new Map());
   const [remoteCameraStreams, setRemoteCameraStreams] = useState<Map<string, MediaStream>>(new Map());
   const [remoteScreenStreams, setRemoteScreenStreams] = useState<Map<string, MediaStream>>(new Map());
+  
+  // Mapping between signaling IDs (guest-xxxx) and backend UUIDs
+  const participantIdMapRef = useRef<Map<string, string>>(new Map());
+  
+  // Debug: Log stream maps whenever they change
+  useEffect(() => {
+    console.log('[Meeting] Stream maps state:', {
+      remoteStreamsSize: remoteStreams.size,
+      remoteCameraStreamsSize: remoteCameraStreams.size,
+      remoteScreenStreamsSize: remoteScreenStreams.size,
+      remoteStreamKeys: Array.from(remoteStreams.keys()),
+      remoteCameraStreamKeys: Array.from(remoteCameraStreams.keys()),
+      remoteScreenStreamKeys: Array.from(remoteScreenStreams.keys()),
+      participantIds: participants.map(p => p.id),
+    });
+  }, [remoteStreams, remoteCameraStreams, remoteScreenStreams, participants]);
   const [showParticipants, setShowParticipants] = useState(true);
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [localCameraStream, setLocalCameraStream] = useState<MediaStream | null>(null);
@@ -74,6 +90,36 @@ export default function Meeting() {
     setTimeout(() => {
       setNotifications(prev => prev.filter(n => n.id !== id));
     }, 3000);
+  };
+
+  // Normalize participant ID: convert signaling ID (guest-xxxx) to backend UUID
+  const normalizeParticipantId = (id: string): string => {
+    // If it's already a UUID, return as-is
+    if (id.includes('-') && id.length === 36) {
+      return id;
+    }
+    
+    // If it's a signaling ID (guest-xxxx), try to find the backend UUID
+    if (participantIdMapRef.current.has(id)) {
+      return participantIdMapRef.current.get(id)!;
+    }
+    
+    // If we have participants, try to match by index or other means
+    // For now, return the signaling ID as fallback
+    return id;
+  };
+
+  // Get backend UUID from signaling ID by matching with participants
+  const getBackendIdFromSignalingId = (signalingId: string): string => {
+    // First check if we have a direct mapping
+    if (participantIdMapRef.current.has(signalingId)) {
+      return participantIdMapRef.current.get(signalingId)!;
+    }
+    
+    // Try to find matching participant by display name or other attributes
+    // For now, just return the signaling ID as fallback
+    console.log('[Meeting] No mapping found for signaling ID:', signalingId, 'using as-is');
+    return signalingId;
   };
 
   const shareUrl = typeof window !== 'undefined' 
@@ -201,28 +247,94 @@ export default function Meeting() {
             localStream: localStreamRef.current,
             turnConfig: data.turnConfig,
             vertoConfig: connectionMode === 'verto' ? {
-              wssUrl: data.wssUrl || 'ws://localhost:8081',
-              login: '1000@172.17.0.3',
-              password: 'CGxv2aoKZS7b',
+              wssUrl: `wss://${window.location.host}/verto`,
+              login: 'admin@192.168.100.218',
+              password: 'admin',
               callerIdName: displayName,
               callerIdNumber: data.participantId,
               turnConfig: data.turnConfig,
-            } : undefined,
+            } : {
+              wssUrl: '',
+              login: '',
+              password: '',
+            },
             callbacks: {
-              onRemoteStream: (participantId: string, stream: MediaStream) => {
-                console.log('Received remote stream from:', participantId);
-                setRemoteStreams(prev => new Map(prev).set(participantId, stream));
+              onRemoteStream: (signalingId: string, stream: MediaStream) => {
+                // Normalize the participant ID (convert guest-xxxx to UUID if needed)
+                const normalizedId = normalizeParticipantId(signalingId);
+                
+                console.log('[Meeting] Received remote stream from:', {
+                  signalingId,
+                  normalizedId,
+                  streamId: stream.id,
+                });
+                
+                const audioTracks = stream.getAudioTracks();
+                const videoTracks = stream.getVideoTracks();
+                console.log('[Meeting] Stream routing:', {
+                  signalingId,
+                  normalizedId,
+                  audioTracks: audioTracks.length,
+                  videoTracks: videoTracks.length,
+                });
+                
+                // Store streams under the normalized participant ID
+                setRemoteStreams(prev => new Map(prev).set(normalizedId, stream));
+                
+                // In VERTO mode, populate camera streams from the main remote stream
+                if (videoTracks.length > 0) {
+                  setRemoteCameraStreams(prev => new Map(prev).set(normalizedId, stream));
+                  console.log('[Meeting] Added camera stream for participant:', normalizedId);
+                }
               },
               onRemoteCameraStream: (participantId: string, stream: MediaStream) => {
-                console.log('[Meeting] Received remote camera stream from:', participantId);
-                setRemoteCameraStreams(prev => new Map(prev).set(participantId, stream));
+                // Normalize the participant ID
+                const normalizedId = normalizeParticipantId(participantId);
+                
+                console.log('[Meeting] 📹 Received remote camera stream from:', {
+                  participantId,
+                  normalizedId,
+                });
+                const audioTracks = stream.getAudioTracks();
+                const videoTracks = stream.getVideoTracks();
+                console.log('[Meeting] Camera stream tracks:', {
+                  participantId,
+                  normalizedId,
+                  audio: audioTracks.length,
+                  video: videoTracks.length,
+                  streamId: stream.id,
+                });
+                
+                // Store under normalized ID
+                setRemoteCameraStreams(prev => new Map(prev).set(normalizedId, stream));
               },
               onRemoteScreenStream: (participantId: string, stream: MediaStream) => {
-                console.log('[Meeting] Received remote screen stream from:', participantId);
-                setRemoteScreenStreams(prev => new Map(prev).set(participantId, stream));
+                // Normalize the participant ID
+                const normalizedId = normalizeParticipantId(participantId);
+                
+                console.log('[Meeting] 📺 Received remote screen stream from:', {
+                  participantId,
+                  normalizedId,
+                });
+                const audioTracks = stream.getAudioTracks();
+                const videoTracks = stream.getVideoTracks();
+                console.log('[Meeting] Screen stream tracks:', {
+                  participantId,
+                  normalizedId,
+                  audio: audioTracks.length,
+                  video: videoTracks.length,
+                  streamId: stream.id,
+                });
+                
+                // Store under normalized ID
+                setRemoteScreenStreams(prev => new Map(prev).set(normalizedId, stream));
               },
               onParticipantLeft: (participantId: string) => {
-                console.log('Participant left:', participantId);
+                console.log('👋 PARTICIPANT LEFT:', {
+                  participantId,
+                  timestamp: new Date().toISOString(),
+                  totalParticipants: participants.length - 1,
+                });
                 setRemoteStreams(prev => {
                   const newMap = new Map(prev);
                   newMap.delete(participantId);
@@ -241,8 +353,16 @@ export default function Meeting() {
                 setParticipants(prev => prev.filter(p => p.id !== participantId));
                 addNotification('A participant left the meeting', 'leave');
               },
-              onParticipantJoined: (participantId: string, name: string) => {
-                console.log('Participant joined:', participantId, name);
+              onParticipantJoined: (signalingId: string, name: string) => {
+                console.log('👋 PARTICIPANT JOINED:', {
+                  signalingId,
+                  displayName: name,
+                  timestamp: new Date().toISOString(),
+                  totalParticipants: participants.length + 1,
+                });
+                // Map signaling ID to backend UUID when participant joins
+                // This will be matched with fetchParticipants results
+                participantIdMapRef.current.set(signalingId, signalingId);
                 addNotification(`${name} joined the meeting`, 'join');
               },
               onChatMessage: (from: string, senderName: string, message: string, timestamp: number) => {
@@ -256,7 +376,7 @@ export default function Meeting() {
               },
               onError: (error: Error) => {
                 console.error('Media service error:', error);
-                setError(error.message);
+                setError(error?.message || String(error) || 'Unknown error');
               },
               onConnected: () => {
                 console.log('[Meeting] Media service connected');
@@ -361,6 +481,12 @@ export default function Meeting() {
         track.enabled = !newMuted;
       });
       setIsMuted(newMuted);
+      console.log('🎤 AUDIO STATE CHANGED:', {
+        isMuted: newMuted,
+        timestamp: new Date().toISOString(),
+        participantId: joinData?.participantId,
+        audioTracksCount: localStreamRef.current.getAudioTracks().length,
+      });
       updateParticipantStatus(newMuted, isVideoOff);
     }
   };
@@ -372,6 +498,12 @@ export default function Meeting() {
         track.enabled = !newVideoOff;
       });
       setIsVideoOff(newVideoOff);
+      console.log('📹 VIDEO STATE CHANGED:', {
+        isVideoOff: newVideoOff,
+        timestamp: new Date().toISOString(),
+        participantId: joinData?.participantId,
+        videoTracksCount: localStreamRef.current.getVideoTracks().length,
+      });
       updateParticipantStatus(isMuted, newVideoOff);
     }
   };
@@ -383,7 +515,11 @@ export default function Meeting() {
         await mediaService.setScreenTrack(null);
         setLocalScreenStream(null);
         setIsScreenSharing(false);
-        console.log('[Meeting] Screen sharing stopped, camera still active');
+        console.log('📺 SCREEN SHARE STOPPED:', {
+          timestamp: new Date().toISOString(),
+          participantId: joinData?.participantId,
+          cameraStillActive: true,
+        });
       } catch (err) {
         console.error('Failed to stop screen share:', err);
       }
@@ -393,9 +529,20 @@ export default function Meeting() {
         const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
         const screenTrack = screenStream.getVideoTracks()[0];
         
+        console.log('📺 SCREEN SHARE STARTED:', {
+          timestamp: new Date().toISOString(),
+          participantId: joinData?.participantId,
+          screenTrackId: screenTrack.id,
+          screenTrackLabel: screenTrack.label,
+          cameraStillActive: true,
+        });
+        
         // Handle when user stops sharing via browser UI
         screenTrack.onended = () => {
-          console.log('[Meeting] Screen share ended by user');
+          console.log('📺 SCREEN SHARE ENDED (user stopped):', {
+            timestamp: new Date().toISOString(),
+            participantId: joinData?.participantId,
+          });
           mediaService.setScreenTrack(null);
           setLocalScreenStream(null);
           setIsScreenSharing(false);
@@ -404,15 +551,26 @@ export default function Meeting() {
         await mediaService.setScreenTrack(screenTrack);
         setLocalScreenStream(screenStream);
         setIsScreenSharing(true);
-        console.log('[Meeting] Screen sharing started, camera still active');
       } catch (err) {
         if (err instanceof Error) {
           if (err.name === 'NotAllowedError') {
-            console.log('[Meeting] User denied screen share permission');
+            console.log('📺 SCREEN SHARE DENIED:', {
+              reason: 'User denied permission',
+              timestamp: new Date().toISOString(),
+              participantId: joinData?.participantId,
+            });
           } else if (err.name === 'NotFoundError') {
-            console.log('[Meeting] No screen share source available');
+            console.log('📺 SCREEN SHARE FAILED:', {
+              reason: 'No screen share source available',
+              timestamp: new Date().toISOString(),
+              participantId: joinData?.participantId,
+            });
           } else {
-            console.error('[Meeting] Failed to share screen:', err);
+            console.error('📺 SCREEN SHARE ERROR:', {
+              error: err.message,
+              timestamp: new Date().toISOString(),
+              participantId: joinData?.participantId,
+            });
           }
         }
       }
@@ -435,11 +593,16 @@ export default function Meeting() {
     );
   }
 
-  const videoParticipants = participants.map(p => ({
-    ...p,
-    isLocal: p.id === joinData?.participantId,
-    stream: p.id === joinData?.participantId ? undefined : remoteStreams.get(p.id),
-  }));
+  const videoParticipants = participants.map(p => {
+    const isLocal = p.id === joinData?.participantId;
+    return {
+      ...p,
+      isLocal,
+      stream: isLocal ? undefined : remoteStreams.get(p.id),
+      cameraStream: isLocal ? localCameraStream : (remoteCameraStreams.get(p.id) as MediaStream | undefined),
+      screenStream: isLocal ? localScreenStream : (remoteScreenStreams.get(p.id) as MediaStream | undefined),
+    };
+  });
 
   // Speaker detection (after videoParticipants is defined)
   const activeSpeakerId = useSpeakerDetection(
@@ -454,6 +617,7 @@ export default function Meeting() {
         <div className="flex-1 p-4">
           <VideoGrid 
             participants={videoParticipants} 
+            localParticipantId={joinData?.participantId}
             localStream={localStream}
             localCameraStream={localCameraStream}
             localScreenStream={localScreenStream}
