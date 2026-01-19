@@ -18,7 +18,7 @@
 - 🎯 **MID-Based Track Identification** - Reliable across all browsers
 - 🔀 **Dual Architecture**:
   - **WebRTC P2P** (2-4 participants): Multiple transceivers per connection
-  - **FreeSWITCH SFU** (5+ participants): Separate SIP calls (Zoom approach)
+  - **FreeSWITCH MCU** (5+ participants): Separate SIP calls (Zoom approach)
 - 📺 **Screen Share Indicator** - Visual feedback for active shares
 - 🛡️ **Error Handling** - Permission denied, browser UI stop, network issues
 
@@ -94,9 +94,9 @@
 |----------|-----------------|-----|
 | 2 people, 1:1 call | WebRTC P2P | Direct connection, lowest latency |
 | 3-4 people, meeting | WebRTC P2P | N² connections manageable, no server needed |
-| 5+ people, meeting | FreeSWITCH SFU | Star topology, server handles mixing |
+| 5+ people, meeting | FreeSWITCH MCU | Star topology, server handles mixing |
 | Screen share (any) | Multi-Track | Simultaneous camera + screen |
-| Large meeting (20+) | FreeSWITCH SFU | Scales to 50+ participants |
+| Large meeting (20+) | FreeSWITCH MCU | Scales to 50+ participants |
 
 ### Participant Count Detection Logic
 
