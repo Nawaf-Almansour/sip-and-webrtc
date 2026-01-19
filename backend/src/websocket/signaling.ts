@@ -4,6 +4,7 @@ import { query } from '../store/db.js';
 import jwt from 'jsonwebtoken';
 import { streamSelectionService } from '../services/streamSelectionService.js';
 import { layoutBroadcastService } from '../services/layoutBroadcastService.js';
+import { streamHandler } from './stream-handler.js';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
 const MAX_MESSAGE_SIZE = 64 * 1024; // 64KB
@@ -229,19 +230,27 @@ export function setupWebSocket(server: Server) {
               return;
             }
             
-            // Add stream type metadata based on offer content
-            const streamType = message.streamType || (message.offer?.sdp?.includes('screen') ? 'screen' : 'camera');
-            console.log('[Signaling] Offer with stream type:', {
+            // Determine stream type using StreamHandler
+            const streamMetadata = streamHandler.determineStreamType(
+              clientId!,
+              message,
+              message.isScreenSharing || false,
+              message.hasCameraStream !== false
+            );
+            
+            console.log('[Signaling] Offer with stream metadata:', {
               from: clientId,
               to: message.to,
-              streamType,
+              streamType: streamMetadata.streamType,
+              reason: streamMetadata.reason,
             });
             
             sendToClient(message.to, {
               type: 'offer',
               from: clientId,
               offer: message.offer,
-              streamType,
+              streamType: streamMetadata.streamType,
+              streamMetadata,
             });
             break;
 
@@ -251,19 +260,27 @@ export function setupWebSocket(server: Server) {
               return;
             }
             
-            // Add stream type metadata to answer
-            const answerStreamType = message.streamType || (message.answer?.sdp?.includes('screen') ? 'screen' : 'camera');
-            console.log('[Signaling] Answer with stream type:', {
+            // Determine stream type using StreamHandler
+            const answerMetadata = streamHandler.determineStreamType(
+              clientId!,
+              message,
+              message.isScreenSharing || false,
+              message.hasCameraStream !== false
+            );
+            
+            console.log('[Signaling] Answer with stream metadata:', {
               from: clientId,
               to: message.to,
-              streamType: answerStreamType,
+              streamType: answerMetadata.streamType,
+              reason: answerMetadata.reason,
             });
             
             sendToClient(message.to, {
               type: 'answer',
               from: clientId,
               answer: message.answer,
-              streamType: answerStreamType,
+              streamType: answerMetadata.streamType,
+              streamMetadata: answerMetadata,
             });
             break;
 
