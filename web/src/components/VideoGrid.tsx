@@ -333,19 +333,23 @@ export default function VideoGrid({
               <div className="text-white text-xs font-semibold px-2 py-1 sticky top-0 bg-gray-800 rounded">
                 Participants ({cameraParticipants.length})
               </div>
-              {cameraParticipants.map((participant) => (
-                <div key={participant.id} className="flex-shrink-0 h-40">
-                  <VideoTile
-                    participant={participant}
-                    stream={participant.isLocal ? localStream : (participant.stream || remoteStreams?.get(participant.id))}
-                    cameraStream={participant.isLocal ? localCameraStream : (participant.cameraStream || remoteCameraStreams?.get(participant.id))}
-                    screenStream={participant.isLocal ? localScreenStream : (participant.screenStream || remoteScreenStreams?.get(participant.id))}
-                    isLocal={participant.isLocal}
-                    isSpeaking={participant.id === activeSpeakerId}
-                    showPiP={false}
-                  />
-                </div>
-              ))}
+              {cameraParticipants.map((participant) => {
+                const isSpeaking = participant.id === activeSpeakerId;
+                const borderClass = isSpeaking ? 'border-4 border-green-500' : 'border-2 border-transparent';
+                return (
+                  <div key={participant.id} className={`flex-shrink-0 h-40 rounded-lg overflow-hidden ${borderClass} transition-all duration-200`}>
+                    <VideoTile
+                      participant={participant}
+                      stream={participant.isLocal ? localStream : (participant.stream || remoteStreams?.get(participant.id))}
+                      cameraStream={participant.isLocal ? localCameraStream : (participant.cameraStream || remoteCameraStreams?.get(participant.id))}
+                      screenStream={participant.isLocal ? localScreenStream : (participant.screenStream || remoteScreenStreams?.get(participant.id))}
+                      isLocal={participant.isLocal}
+                      isSpeaking={isSpeaking}
+                      showPiP={false}
+                    />
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>
