@@ -449,86 +449,13 @@ Screen displayed in Picture-in-Picture
   - Bandwidth per participant: ~1.5 Mbps (camera + audio)
   - Total bandwidth: ~75 Mbps uplink/downlink
 
-**Backend Server (Node.js)**:
-- **vCPU**: 4 vCPU (t3.xlarge on AWS)
-- **RAM**: 8 GB
-- **Storage**: 100 GB SSD
-- **Role**: Signaling only (media handled by FreeSWITCH)
-
-**Database Server (PostgreSQL)**:
-- **vCPU**: 4 vCPU (t3.xlarge on AWS)
-- **RAM**: 16 GB
-- **Storage**: 100 GB SSD
-- **Connection pool**: 100+ connections
-
-**TURN/STUN Server (coturn)**:
-- **vCPU**: 4 vCPU (t3.xlarge on AWS)
-- **RAM**: 8 GB
-- **Bandwidth**: ~50 Mbps
-
-**Total for 50 Users**:
-- **Total vCPU**: 28 vCPU
-- **Total RAM**: 64 GB
-- **Total Storage**: 700 GB SSD
-- **Estimated Cost** (AWS): ~$1,200-1,500/month
 
 ### For 200 Participants (Distributed MCU Cluster)
 
 **Architecture**: Multiple FreeSWITCH MCU servers with load balancing
 
 **FreeSWITCH MCU Cluster** (4 servers recommended):
-- **vCPU per server**: 16 vCPU (c5.4xlarge on AWS)
-- **RAM per server**: 32 GB
-- **Storage per server**: 500 GB SSD
-- **Network**: 10 Gbps NIC per server
-- **Configuration**:
-  - 4 MCU servers × 50 participants = 200 total
-  - Each server handles 50 participants independently
-  - No inter-server media mixing (simplifies architecture)
-  - Total bandwidth: ~300 Mbps
-
-**Load Balancer**:
-- **vCPU**: 4 vCPU (t3.xlarge on AWS)
-- **RAM**: 8 GB
-- **Type**: nginx or HAProxy
-- **Features**:
-  - Connection distribution across 4 MCU servers
-  - Sticky sessions for WebSocket signaling
-  - Health checks every 5 seconds
-
-**Backend Server (Node.js) - Scaled**:
-- **Instances**: 2-4 behind load balancer
-- **vCPU per instance**: 4 vCPU (t3.xlarge on AWS)
-- **RAM per instance**: 8 GB
-- **Storage per instance**: 100 GB SSD
-- **Role**: Signaling only
-
-**Database (PostgreSQL) - Scaled**:
-- **vCPU**: 8 vCPU (c5.2xlarge on AWS)
-- **RAM**: 32 GB
-- **Storage**: 500 GB SSD
-- **Connection pool**: 200+ connections
-- **Read replicas**: 2 for scaling queries
-
-**TURN/STUN Server Cluster**:
-- **Servers**: 2-4 TURN servers
-- **vCPU per server**: 4 vCPU (t3.xlarge on AWS)
-- **RAM per server**: 8 GB
-- **Shared TURN secret**: For failover
-- **Total bandwidth**: ~300 Mbps
-
-**Network Infrastructure**:
-- **Internet**: 100 Mbps+ connection
-- **Redundancy**: Dual ISP with automatic failover
-- **CDN**: CloudFront or equivalent for static assets
-- **DDoS Protection**: AWS Shield or Cloudflare
-- **Monitoring**: Multi-region health checks
-
-**Total for 200 Users**:
-- **Total vCPU**: 92 vCPU (4×16 MCU + 4×4 backend + 4 LB + 8 DB + 4×4 TURN)
-- **Total RAM**: 256 GB
-- **Total Storage**: 3.5 TB SSD
-- **Estimated Cost** (AWS): ~$6,000-8,000/month
+-6,000-8,000/month
 
 ### Performance Metrics
 
