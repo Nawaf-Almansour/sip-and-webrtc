@@ -2,10 +2,13 @@ import { useRef, useEffect, useMemo } from 'react';
 
 export type LayoutType = 'grid' | 'speaker' | 'sidebar' | 'presentation';
 
+export type StreamType = 'camera' | 'screen' | 'none';
+
 interface Participant {
   id: string;
   displayName: string;
   stream?: MediaStream | null;
+  streamType?: StreamType;
   isLocal?: boolean;
   isSpeaking?: boolean;
 }
@@ -31,6 +34,7 @@ function VideoTile({ participant, stream, isLocal, isSpeaking, isLarge }: {
 
   // Backend determines which stream to send (camera or screen)
   const mainStream = stream;
+  const streamType = participant.streamType || 'camera';
 
   useEffect(() => {
     if (!videoRef.current) return;
@@ -45,6 +49,7 @@ function VideoTile({ participant, stream, isLocal, isSpeaking, isLarge }: {
             participantId: participant.id,
             displayName: participant.displayName,
             streamId: mainStream.id,
+            streamType,
             videoTracks: videoTracks.length,
             audioTracks: mainStream.getAudioTracks().length,
           });
@@ -58,7 +63,7 @@ function VideoTile({ participant, stream, isLocal, isSpeaking, isLarge }: {
         boundStreamRef.current = null;
       }
     }
-  }, [mainStream, participant.id]);
+  }, [mainStream, participant.id, streamType]);
 
   const borderClass = isSpeaking ? 'border-4 border-green-500' : 'border-2 border-transparent';
 
@@ -80,6 +85,13 @@ function VideoTile({ participant, stream, isLocal, isSpeaking, isLarge }: {
       <div className="absolute bottom-2 left-2 text-white text-sm bg-black/50 px-2 py-1 rounded">
         {participant.displayName} {isLocal && '(You)'}
       </div>
+      {mainStream && streamType && (
+        <div className={`absolute top-2 right-2 text-xs px-2 py-1 rounded ${
+          streamType === 'screen' ? 'bg-purple-600/80 text-white' : 'bg-blue-600/80 text-white'
+        }`}>
+          {streamType === 'screen' ? '📺 Screen' : '📷 Camera'}
+        </div>
+      )}
       {!mainStream && !isLocal && (
         <div className="absolute top-2 right-2 text-yellow-400 text-xs bg-black/50 px-2 py-1 rounded">
           Connecting...
