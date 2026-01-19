@@ -143,6 +143,51 @@ Participant Count Detection
 - Reduces client CPU/bandwidth load
 - Star topology (all streams route through MCU)
 
+### How the Two Modes Work Together
+
+```
+Meeting Created
+        ↓
+Participant Joins
+        ↓
+    ┌───────────────────────┐
+    │ Check Count ≤ 4?      │
+    └───────────────────────┘
+         ↙              ↘
+      YES              NO
+       ↓                ↓
+  WebRTC P2P      FreeSWITCH MCU
+  Mode Active     Mode Active
+       ↓                ↓
+  Direct P2P      SIP Calls to
+  Connections     FreeSWITCH
+       ↓                ↓
+  Participant     Participant
+  Receives N-1    Receives 1
+  Individual      Mixed Stream
+  Streams              ↓
+       ↓           MCU Mixes
+  Low Latency     All Streams
+  High Bandwidth      ↓
+                  Optimized
+                  Bandwidth
+```
+
+**Transition Scenario**:
+- Meeting starts with 3 participants → **WebRTC P2P mode**
+- 4th participant joins → Still **WebRTC P2P mode** (N² = 6 connections)
+- 5th participant joins → **Automatic switch to FreeSWITCH MCU mode**
+  - All 5 participants disconnect from P2P
+  - All 5 establish SIP calls to FreeSWITCH MCU
+  - MCU mixes streams and sends single mixed stream to each
+  - Latency increases slightly, but bandwidth per participant decreases
+
+**Key Advantages**:
+- **Small meetings**: Lowest latency, no server load
+- **Large meetings**: Scalable, optimized bandwidth
+- **Automatic switching**: No manual configuration needed
+- **Seamless transition**: Users don't need to rejoin
+
 ### Stream Routing: How Tracks Become Visible
 
 ```
