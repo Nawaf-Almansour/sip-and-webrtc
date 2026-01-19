@@ -2,9 +2,10 @@ import { webrtcService } from './webrtc';
 import { vertoService, VertoConfig } from './vertoService';
 
 export type ConnectionMode = 'webrtc' | 'verto';
+export type StreamType = 'camera' | 'screen' | 'none';
 
 export interface MediaServiceCallbacks {
-  onRemoteStream?: (participantId: string, stream: MediaStream) => void;
+  onRemoteStream?: (participantId: string, stream: MediaStream, streamType?: StreamType) => void;
   onRemoteCameraStream?: (participantId: string, stream: MediaStream) => void;
   onRemoteScreenStream?: (participantId: string, stream: MediaStream) => void;
   onParticipantLeft?: (participantId: string) => void;

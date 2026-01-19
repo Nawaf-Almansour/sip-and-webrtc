@@ -2,6 +2,8 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { Server, IncomingMessage } from 'http';
 import { query } from '../store/db.js';
 import jwt from 'jsonwebtoken';
+import { streamSelectionService } from '../services/streamSelectionService.js';
+import { layoutBroadcastService } from '../services/layoutBroadcastService.js';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
 const MAX_MESSAGE_SIZE = 64 * 1024; // 64KB
@@ -226,10 +228,20 @@ export function setupWebSocket(server: Server) {
               ws.send(JSON.stringify({ type: 'error', message: 'SDP too large' }));
               return;
             }
+            
+            // Add stream type metadata based on offer content
+            const streamType = message.streamType || (message.offer?.sdp?.includes('screen') ? 'screen' : 'camera');
+            console.log('[Signaling] Offer with stream type:', {
+              from: clientId,
+              to: message.to,
+              streamType,
+            });
+            
             sendToClient(message.to, {
               type: 'offer',
               from: clientId,
               offer: message.offer,
+              streamType,
             });
             break;
 
@@ -238,10 +250,20 @@ export function setupWebSocket(server: Server) {
               ws.send(JSON.stringify({ type: 'error', message: 'Not authenticated' }));
               return;
             }
+            
+            // Add stream type metadata to answer
+            const answerStreamType = message.streamType || (message.answer?.sdp?.includes('screen') ? 'screen' : 'camera');
+            console.log('[Signaling] Answer with stream type:', {
+              from: clientId,
+              to: message.to,
+              streamType: answerStreamType,
+            });
+            
             sendToClient(message.to, {
               type: 'answer',
               from: clientId,
               answer: message.answer,
+              streamType: answerStreamType,
             });
             break;
 
