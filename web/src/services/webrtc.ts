@@ -1,5 +1,13 @@
 type MessageHandler = (message: any) => void;
 
+interface TrackMetadata {
+  participantId: string;
+  type: 'camera' | 'screen' | 'audio';
+  mode: 'p2p' | 'mcu';
+  mid?: string;
+  timestamp: number;
+}
+
 interface ParticipantTracks {
   audio: MediaStreamTrack | null;
   camera: MediaStreamTrack | null;
@@ -27,6 +35,8 @@ export class WebRTCService {
   private participantId: string = '';
   private meetingId: string = '';
   private displayName: string = '';
+  private connectionMode: 'p2p' | 'mcu' = 'p2p';
+  private trackMetadataMap = new Map<string, TrackMetadata>();  // trackId -> metadata
   private iceServers: RTCIceServer[] = [
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
@@ -51,7 +61,8 @@ export class WebRTCService {
       onParticipantJoined: (participantId: string, displayName: string) => void;
       onChatMessage?: (from: string, displayName: string, message: string, timestamp: string) => void;
     },
-    iceServers?: RTCIceServer[]
+    iceServers?: RTCIceServer[],
+    wsToken?: string
   ) {
     if (iceServers && iceServers.length > 0) {
       this.iceServers = iceServers;
@@ -79,72 +90,120 @@ export class WebRTCService {
     const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsUrl = `${wsProtocol}//${window.location.host}/ws`;
     
+    // Use nullish coalescing for cleaner token fallback
+    const token = wsToken ?? 'guest';
+    
+    console.log('[WebSocket] Token value:', token);
+    console.log('[WebSocket] Using guest token:', token === 'guest');
+    
     this.ws = new WebSocket(wsUrl);
-
+    
     this.ws.onopen = () => {
-      console.log('WebSocket connected');
+      console.log('[WebSocket] Connected to signaling server');
+      console.log('[WebSocket] Sending join message:', { 
+        meetingId, 
+        participantId, 
+        displayName,
+        token
+      });
       this.send({
         type: 'join',
         meetingId,
         participantId,
         displayName,
+        token,
       });
     };
 
     this.ws.onmessage = (event) => {
-      const message = JSON.parse(event.data);
-      this.handleMessage(message);
+      try {
+        const message = JSON.parse(event.data);
+        console.log('[WebSocket] Received message:', message.type, message);
+        this.handleMessage(message);
+      } catch (err) {
+        console.error('[WebSocket] Failed to parse message:', event.data, err);
+      }
     };
 
     this.ws.onerror = (error) => {
-      console.error('WebSocket error:', error);
+      console.error('[WebSocket] Connection error:', error);
+      console.error('[WebSocket] Error details:', {
+        type: error instanceof Event ? error.type : 'unknown',
+        message: error instanceof Error ? error.message : String(error),
+      });
     };
 
-    this.ws.onclose = () => {
-      console.log('WebSocket disconnected');
+    this.ws.onclose = (event) => {
+      console.log('[WebSocket] Connection closed');
+      console.log('[WebSocket] Close code:', event.code, 'Reason:', event.reason);
     };
   }
 
   private send(message: any) {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      console.log('[WebSocket] Sending message:', message.type, message);
       this.ws.send(JSON.stringify(message));
+    } else {
+      console.warn('[WebSocket] Cannot send message - WebSocket not ready. State:', this.ws?.readyState);
     }
   }
 
   private async handleMessage(message: any) {
-    switch (message.type) {
-      case 'existing-participants':
-        for (const participant of message.participants) {
-          await this.createPeerConnection(participant.id, true);
-          this.onParticipantJoined?.(participant.id, participant.displayName);
-        }
-        break;
+    console.log('[WebSocket] Handling message type:', message.type);
+    try {
+      switch (message.type) {
+        case 'error':
+        case 'auth_error':
+          console.error('[WebSocket] Authentication error:', message.message);
+          console.error('[WebSocket] Error details:', message);
+          break;
 
-      case 'user-joined':
-        await this.createPeerConnection(message.participantId, false);
-        this.onParticipantJoined?.(message.participantId, message.displayName);
-        break;
+        case 'existing-participants':
+          console.log('[WebSocket] Processing existing participants:', message.participants?.length || 0);
+          for (const participant of message.participants) {
+            console.log('[WebSocket] Creating peer connection for existing participant:', participant.id);
+            await this.createPeerConnection(participant.id, true);
+            this.onParticipantJoined?.(participant.id, participant.displayName);
+          }
+          break;
 
-      case 'user-left':
-        this.closePeerConnection(message.participantId);
-        this.onParticipantLeft?.(message.participantId);
-        break;
+        case 'user-joined':
+          console.log('[WebSocket] User joined:', message.participantId, message.displayName);
+          await this.createPeerConnection(message.participantId, false);
+          this.onParticipantJoined?.(message.participantId, message.displayName);
+          break;
 
-      case 'offer':
-        await this.handleOffer(message.from, message.offer);
-        break;
+        case 'user-left':
+          console.log('[WebSocket] User left:', message.participantId);
+          this.closePeerConnection(message.participantId);
+          this.onParticipantLeft?.(message.participantId);
+          break;
 
-      case 'answer':
-        await this.handleAnswer(message.from, message.answer);
-        break;
+        case 'offer':
+          console.log('[WebSocket] Received offer from:', message.from);
+          await this.handleOffer(message.from, message.offer);
+          break;
 
-      case 'ice-candidate':
-        await this.handleIceCandidate(message.from, message.candidate);
-        break;
+        case 'answer':
+          console.log('[WebSocket] Received answer from:', message.from);
+          await this.handleAnswer(message.from, message.answer);
+          break;
 
-      case 'chat':
-        this.onChatMessage?.(message.from, message.displayName, message.message, message.timestamp);
-        break;
+        case 'ice-candidate':
+          console.log('[WebSocket] Received ICE candidate from:', message.from);
+          await this.handleIceCandidate(message.from, message.candidate);
+          break;
+
+        case 'chat':
+          console.log('[WebSocket] Received chat message from:', message.from);
+          this.onChatMessage?.(message.from, message.displayName, message.message, message.timestamp);
+          break;
+
+        default:
+          console.warn('[WebSocket] Unknown message type:', message.type);
+      }
+    } catch (err) {
+      console.error('[WebSocket] Error handling message:', err, 'Message:', message);
     }
   }
 
@@ -168,7 +227,59 @@ export class WebRTCService {
     if (this.localStream) {
       this.localStream.getTracks().forEach(track => {
         pc.addTrack(track, this.localStream!);
-        console.log(`[WebRTC] Added ${track.kind} track via addTrack`);
+        
+        // Determine track type from label or kind
+        let trackType: 'camera' | 'screen' | 'audio' = 'camera';
+        if (track.kind === 'audio') {
+          trackType = 'audio';
+        } else if (track.label.includes('screen') || track.label.includes('Screen')) {
+          trackType = 'screen';
+        }
+        
+        // Add metadata to track
+        const metadata: TrackMetadata = {
+          participantId: this.participantId,
+          type: trackType,
+          mode: this.connectionMode,
+          timestamp: Date.now(),
+        };
+        this.trackMetadataMap.set(track.id, metadata);
+        (track as any).meta = metadata;
+        
+        console.log(`[WebRTC] Added ${track.kind} track via addTrack`, {
+          trackId: track.id,
+          trackLabel: track.label,
+          trackType,
+          mode: this.connectionMode,
+          enabled: track.enabled,
+          kind: track.kind,
+        });
+        
+        // Track enabled/disabled state changes
+        track.onended = () => {
+          console.log(`[WebRTC] ${track.kind} track ended:`, {
+            trackId: track.id,
+            trackLabel: track.label,
+            metadata: this.trackMetadataMap.get(track.id),
+          });
+          this.trackMetadataMap.delete(track.id);
+        };
+        
+        track.onmute = () => {
+          console.log(`[WebRTC] ${track.kind} track muted:`, {
+            trackId: track.id,
+            trackLabel: track.label,
+            metadata: this.trackMetadataMap.get(track.id),
+          });
+        };
+        
+        track.onunmute = () => {
+          console.log(`[WebRTC] ${track.kind} track unmuted:`, {
+            trackId: track.id,
+            trackLabel: track.label,
+            metadata: this.trackMetadataMap.get(track.id),
+          });
+        };
       });
     }
 
@@ -204,37 +315,94 @@ export class WebRTCService {
         trackId: event.track.id,
         streamId: event.streams[0]?.id,
         transceiverDirection: event.transceiver.direction,
-        transceiverCurrentDirection: event.transceiver.currentDirection
+        transceiverCurrentDirection: event.transceiver.currentDirection,
+        remoteId,
       });
       
-      const trackType = this.getTrackType(event.transceiver.mid, event.track.label);
-      const stream = event.streams[0];
       const peerConn = this.peerConnections.get(remoteId);
-      
-      console.log('[WebRTC] Track type determined:', trackType, 'for mid:', event.transceiver.mid);
       
       if (!peerConn) {
         console.warn('[WebRTC] No peer connection found for remote:', remoteId);
         return;
       }
 
-      // Handle tracks by kind - first video is camera, audio is audio
+      // Determine track type based on track kind and MID
+      let trackType: 'camera' | 'screen' | 'audio' = 'camera';
       if (event.track.kind === 'audio') {
-        console.log('[WebRTC] Received audio track from:', remoteId, 'stream:', stream?.id);
+        trackType = 'audio';
+      } else if (event.track.kind === 'video') {
+        // Use MID to determine if it's camera (0) or screen (2)
+        // MID 0 = camera, MID 1 = audio, MID 2 = screen
+        if (event.transceiver.mid === '0') {
+          trackType = 'camera';
+        } else if (event.transceiver.mid === '2') {
+          trackType = 'screen';
+        } else {
+          // Fallback: first video is camera, second is screen
+          trackType = !peerConn.cameraStream ? 'camera' : 'screen';
+        }
+      }
+      
+      // Add metadata to remote track
+      const remoteMetadata: TrackMetadata = {
+        participantId: remoteId,
+        type: trackType,
+        mode: this.connectionMode,
+        mid: event.transceiver.mid || undefined,
+        timestamp: Date.now(),
+      };
+      this.trackMetadataMap.set(event.track.id, remoteMetadata);
+      (event.track as any).meta = remoteMetadata;
+      
+      console.log('[WebRTC] Track type determined:', trackType, 'for mid:', event.transceiver.mid, 'from:', remoteId, 'metadata:', remoteMetadata);
+      
+      // Create proper stream if not provided
+      let stream = event.streams[0];
+      if (!stream && event.track) {
+        console.log('[WebRTC] Creating new stream for track:', trackType, 'from:', remoteId);
+        stream = new MediaStream([event.track]);
+      }
+
+      // Add track state change listeners
+      event.track.onended = () => {
+        console.log(`[WebRTC] ${trackType} track ended from ${remoteId}:`, {
+          trackId: event.track.id,
+          trackLabel: event.track.label,
+          metadata: this.trackMetadataMap.get(event.track.id),
+        });
+        this.trackMetadataMap.delete(event.track.id);
+      };
+      
+      event.track.onmute = () => {
+        console.log(`[WebRTC] ${trackType} track muted from ${remoteId}:`, {
+          trackId: event.track.id,
+          trackLabel: event.track.label,
+          metadata: this.trackMetadataMap.get(event.track.id),
+        });
+      };
+      
+      event.track.onunmute = () => {
+        console.log(`[WebRTC] ${trackType} track unmuted from ${remoteId}:`, {
+          trackId: event.track.id,
+          trackLabel: event.track.label,
+          metadata: this.trackMetadataMap.get(event.track.id),
+        });
+      };
+
+      // Handle tracks by type
+      if (trackType === 'audio') {
+        console.log('[WebRTC] 🎤 AUDIO track received from:', remoteId, 'stream:', stream?.id);
         peerConn.stream = stream;
         this.onRemoteStream?.(remoteId, stream);
-      } else if (event.track.kind === 'video') {
-        // First video track is camera, second is screen
-        if (!peerConn.cameraStream) {
-          console.log('[WebRTC] Received CAMERA video track from:', remoteId, 'stream:', stream?.id);
-          peerConn.cameraStream = stream;
-          this.onRemoteCameraStream?.(remoteId, stream);
-          this.onRemoteStream?.(remoteId, stream);
-        } else {
-          console.log('[WebRTC] Received SCREEN video track from:', remoteId, 'stream:', stream?.id);
-          peerConn.screenStream = stream;
-          this.onRemoteScreenStream?.(remoteId, stream);
-        }
+      } else if (trackType === 'camera') {
+        console.log('[WebRTC] 📹 CAMERA video track received from:', remoteId, 'stream:', stream?.id);
+        peerConn.cameraStream = stream;
+        this.onRemoteCameraStream?.(remoteId, stream);
+        this.onRemoteStream?.(remoteId, stream);
+      } else if (trackType === 'screen') {
+        console.log('[WebRTC] 📺 SCREEN SHARE track received from:', remoteId, 'stream:', stream?.id);
+        peerConn.screenStream = stream;
+        this.onRemoteScreenStream?.(remoteId, stream);
       }
     };
 
@@ -514,6 +682,19 @@ export class WebRTCService {
 
   getRemoteStream(participantId: string): MediaStream | undefined {
     return this.peerConnections.get(participantId)?.stream;
+  }
+
+  getPeerConnectionStatus(): { [key: string]: any } {
+    const status: { [key: string]: any } = {};
+    this.peerConnections.forEach((conn, participantId) => {
+      status[participantId] = {
+        connectionState: conn.pc.connectionState,
+        iceConnectionState: conn.pc.iceConnectionState,
+        iceGatheringState: conn.pc.iceGatheringState,
+        signalingState: conn.pc.signalingState,
+      };
+    });
+    return status;
   }
 }
 
