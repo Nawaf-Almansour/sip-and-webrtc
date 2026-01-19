@@ -16,20 +16,32 @@
 
 ### Backend
 
-- Node.js 20.x LTS + TypeScript 5.4.x
+- Node.js 20.x LTS + TypeScript 5.6.x
 - Express 4.21.x (REST API)
-- drachtio-srf 4.5.x (SIP Routing)
-- drachtio-fsmrf 3.x (Media Control)
+- drachtio-srf 4.5.x (SIP Routing for FreeSWITCH)
+- WebSocket 8.19.x (P2P signaling)
 - Prisma 5.x + ioredis 5.4.x
 - Zod 3.23.x + Pino 9.x
+- JWT + express-rate-limit (Security)
 
 ### Infrastructure
 
-- FreeSWITCH 1.10.12 (Media Server)
-- drachtio-server 0.8.25 (SIP B2BUA)
+- FreeSWITCH 1.10.12 (Media Server + MCU)
 - coturn 4.6.2 (TURN/STUN)
 - PostgreSQL 16.x + Redis 7.2.x
 - Docker 25.x + Docker Compose 2.x
+
+### Signaling Architecture (Hybrid)
+
+**WebRTC P2P Mode (2-4 participants)**:
+- WebSocket (WSS) for signaling
+- Direct peer-to-peer connections
+- No SIP/drachtio needed
+
+**FreeSWITCH SFU Mode (5+ participants)**:
+- Verto protocol (SIP over WebSocket)
+- drachtio-srf for SIP routing
+- FreeSWITCH MCU for media mixing
 
 ### Codecs & Protocols
 
@@ -37,6 +49,7 @@
 - Video: VP8 (primary), VP9 (fallback)
 - Transport: WSS (TLS 1.3)
 - Security: SRTP/DTLS-SRTP
+- Signaling: WebSocket (P2P) + Verto/SIP (SFU)
 - ICE: STUN + TURN (UDP/TCP/TLS)
 
 ---
